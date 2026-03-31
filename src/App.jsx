@@ -677,6 +677,7 @@ export default function App() {
         dateTeamActivity: p.dateTeamActivity || "",
         dateWarmupPhysical: p.dateWarmupPhysical || "",
         dateProductCourse: p.dateProductCourse || "",
+        warmupStalled: Boolean(p.warmupStalled),
       }));
       setPartners(migratedPartners);
       if (loadedPartners.some(p => p.role === "夥伴" || p.role === "拒絕")) save(KEYS.partners, migratedPartners);
@@ -1137,6 +1138,9 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       return true;
     })
     .sort((a, b) => {
+      const aStalled = Boolean(a.warmupStalled);
+      const bStalled = Boolean(b.warmupStalled);
+      if (aStalled !== bStalled) return aStalled ? 1 : -1; // 暖身卡關者固定置底
       if (sortBy === "region-asc") return String(a.region||"").localeCompare(String(b.region||""), "zh-Hant");
       if (sortBy === "region-desc") return String(b.region||"").localeCompare(String(a.region||""), "zh-Hant");
       if (sortBy === "attribute-asc") return String(a.attribute||"").localeCompare(String(b.attribute||""), "zh-Hant");
@@ -1204,7 +1208,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     }
   };
 
-  const openNew = () => { setEditData({id:uid(),name:"",role:"暖身中",avatar:"",photo:"",attribute:"",painPoint:"",region:"",vacation:"",memo:"",gender:"",relation:"",age:"",occupation:"",salary:"",dateTalkVenue:"",dateTeamActivity:"",dateWarmupPhysical:"",dateProductCourse:"",costs:[],abcNote:ABC_TEMPLATE,joined:new Date().toISOString().slice(0,10)}); setShowForm(true); };
+  const openNew = () => { setEditData({id:uid(),name:"",role:"暖身中",avatar:"",photo:"",attribute:"",painPoint:"",region:"",vacation:"",memo:"",gender:"",relation:"",age:"",occupation:"",salary:"",dateTalkVenue:"",dateTeamActivity:"",dateWarmupPhysical:"",dateProductCourse:"",warmupStalled:false,costs:[],abcNote:ABC_TEMPLATE,joined:new Date().toISOString().slice(0,10)}); setShowForm(true); };
   const openEdit = (p) => {
     const nextRole = p.role === "夥伴" ? "已加入" : p.role;
     setEditData({
@@ -1224,6 +1228,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       dateTeamActivity: p.dateTeamActivity || "",
       dateWarmupPhysical: p.dateWarmupPhysical || "",
       dateProductCourse: p.dateProductCourse || "",
+      warmupStalled: Boolean(p.warmupStalled),
       abcNote: p.abcNote || "",
     });
     setShowForm(true);
@@ -1239,6 +1244,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       dateTeamActivity: String(editData.dateTeamActivity ?? "").trim(),
       dateWarmupPhysical: String(editData.dateWarmupPhysical ?? "").trim(),
       dateProductCourse: String(editData.dateProductCourse ?? "").trim(),
+      warmupStalled: Boolean(editData.warmupStalled),
     };
     const next=partners.find(p=>p.id===entry.id)?partners.map(p=>p.id===entry.id?entry:p):[...partners,entry];
     setPartners(next); setShowForm(false);
@@ -1475,7 +1481,10 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
               </div>
               <div>
                 <div style={{fontWeight:700,fontSize:14}}>{p.name}</div>
-                <div style={{marginTop:4}}>{roleBadge(p.role)}</div>
+                <div style={{marginTop:4,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                  {roleBadge(p.role)}
+                  {p.warmupStalled && <span className="tag">暖身卡關</span>}
+                </div>
               </div>
             </div>
             <div className="mb-6" style={{display:"flex",flexWrap:"wrap",gap:4}}>
@@ -1530,6 +1539,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
                   ["職業", selected.occupation],
                   ["薪資", selected.salary != null && String(selected.salary).trim() !== "" ? String(selected.salary) : ""],
                   ["加入名單", selected.joined ? fmtFullDate(selected.joined) : ""],
+                  ["暖身卡關註記", selected.warmupStalled ? "是" : ""],
                   ["談場", selected.dateTalkVenue ? fmtFullDate(selected.dateTalkVenue) : ""],
                   ["團隊活動", selected.dateTeamActivity ? fmtFullDate(selected.dateTeamActivity) : ""],
                   ["實體暖身", selected.dateWarmupPhysical ? fmtFullDate(selected.dateWarmupPhysical) : ""],
@@ -1732,6 +1742,13 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
           <div className="form-row">
             <div className="form-group"><label className="label">地區</label><input className="input" value={editData.region} onChange={e=>setEditData({...editData,region:e.target.value})}/></div>
             <div className="form-group"><label className="label">休假</label><input className="input" value={editData.vacation} onChange={e=>setEditData({...editData,vacation:e.target.value})}/></div>
+          </div>
+          <div className="form-group">
+            <label className="label">暖身卡關註記（已聊天但尚未約出實體見面）</label>
+            <label className="text-sm" style={{display:"flex",alignItems:"center",gap:8}}>
+              <input type="checkbox" checked={Boolean(editData.warmupStalled)} onChange={e=>setEditData({...editData,warmupStalled:e.target.checked})}/>
+              排序置底
+            </label>
           </div>
           <div className="form-row">
             <div className="form-group"><label className="label">性別</label><input className="input" value={editData.gender} onChange={e=>setEditData({...editData,gender:e.target.value})}/></div>
