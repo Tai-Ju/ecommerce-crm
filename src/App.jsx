@@ -10,6 +10,7 @@ const KEYS = {
   playbook: "crm3:playbook",
   manifest: "crm3:manifest",
   incomes: "crm3:incomes",
+  selfCosts: "crm3:selfCosts",
 };
 
 function getCrmApi() {
@@ -363,6 +364,7 @@ export default function App() {
   const [playbook, setPlaybook] = useState([]);
   const [manifest, setManifest] = useState(SEED_MANIFEST);
   const [incomes, setIncomes] = useState([]);
+  const [selfCosts, setSelfCosts] = useState([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -380,6 +382,7 @@ export default function App() {
       setPlaybook((await load(KEYS.playbook)) || SEED_PLAYBOOK);
       setManifest((await load(KEYS.manifest)) || SEED_MANIFEST);
       setIncomes((await load(KEYS.incomes)) || []);
+      setSelfCosts((await load(KEYS.selfCosts)) || []);
       setLoaded(true);
     })();
   }, []);
@@ -408,7 +411,7 @@ export default function App() {
           </nav>
         </header>
         <main className="main">
-          {tab==="dashboard" && <Dashboard partners={partners} persistPartners={p=>persist(KEYS.partners,p,setPartners)} interactions={interactions} setInteractions={i=>persist(KEYS.interactions,i,setInteractions)} todos={todos} goals={goals} setGoals={g=>persist(KEYS.goals,g,setGoals)} setTodos={t=>persist(KEYS.todos,t,setTodos)} manifest={manifest} setManifest={m=>persist(KEYS.manifest,m,setManifest)} incomes={incomes} persistIncomes={v=>persist(KEYS.incomes,v,setIncomes)}/>}
+          {tab==="dashboard" && <Dashboard partners={partners} interactions={interactions} setInteractions={i=>persist(KEYS.interactions,i,setInteractions)} todos={todos} goals={goals} setGoals={g=>persist(KEYS.goals,g,setGoals)} setTodos={t=>persist(KEYS.todos,t,setTodos)} manifest={manifest} setManifest={m=>persist(KEYS.manifest,m,setManifest)} incomes={incomes} persistIncomes={v=>persist(KEYS.incomes,v,setIncomes)} selfCosts={selfCosts} persistSelfCosts={v=>persist(KEYS.selfCosts,v,setSelfCosts)}/>}
           {tab==="partners"  && <Partners
             partners={partners}
             setPartners={p=>persist(KEYS.partners,p,setPartners)}
@@ -427,7 +430,7 @@ export default function App() {
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────
-function Dashboard({ partners, persistPartners, interactions, setInteractions, goals, setGoals, manifest, setManifest, incomes, persistIncomes }) {
+function Dashboard({ partners, interactions, setInteractions, goals, setGoals, manifest, setManifest, incomes, persistIncomes, selfCosts, persistSelfCosts }) {
   const [editGoals, setEditGoals] = useState(false);
   const [editManifest, setEditManifest] = useState(false);
   const [gd, setGd] = useState(goals);
@@ -437,8 +440,8 @@ function Dashboard({ partners, persistPartners, interactions, setInteractions, g
   const [editingIncomeId, setEditingIncomeId] = useState("");
   const [incomeDraft, setIncomeDraft] = useState({ date: new Date().toISOString().slice(0,10), amount: "", note: "" });
   const [showCostForm, setShowCostForm] = useState(false);
-  const [editingCost, setEditingCost] = useState(null); // { partnerId, costId }
-  const [costDraft, setCostDraft] = useState({ partnerId: "", date: new Date().toISOString().slice(0,10), type: "買貨", amount: "", note: "" });
+  const [editingCostId, setEditingCostId] = useState("");
+  const [costDraft, setCostDraft] = useState({ date: new Date().toISOString().slice(0,10), type: "買貨", amount: "", note: "" });
 
   const saveIncomes = (next) => {
     persistIncomes(next);
@@ -448,7 +451,7 @@ function Dashboard({ partners, persistPartners, interactions, setInteractions, g
   const rcol = { 未加入:"#aaa", 暖身中:"#2563eb", 確定談場:"#b8860b", 跟進中:"#7c3aed", 拒絕:"#c0392b", 已加入:"#27ae60" };
 
   const totalIncome = incomes.reduce((s,i)=>s+i.amount,0);
-  const totalCost = partners.reduce((s,p)=>s+(p.costs||[]).reduce((a,c)=>a+c.amount,0),0);
+  const totalCost = selfCosts.reduce((s,c)=>s+(+c.amount||0),0);
   const pct = (v,m) => Math.min(100, Math.round((v/(m||1))*100));
 
   // Pending items from time axis (interactions with status 待執行)
@@ -475,13 +478,11 @@ function Dashboard({ partners, persistPartners, interactions, setInteractions, g
     setShowIncomeForm(false);
   };
 
-  const nonUplinePartners = partners.filter(p=>p.role!=="上線");
-  const allCosts = partners.flatMap(p=>(p.costs||[]).map(c=>({ ...c, partnerId:p.id, partnerName:p.name }))).sort((a,b)=>b.date.localeCompare(a.date));
+  const allCosts = [...selfCosts].sort((a,b)=>b.date.localeCompare(a.date));
 
   const openCostNew = () => {
-    setEditingCost(null);
+    setEditingCostId("");
     setCostDraft({
-      partnerId: nonUplinePartners[0]?.id || "",
       date: new Date().toISOString().slice(0,10),
       type: "買貨",
       amount: "",
@@ -490,9 +491,8 @@ function Dashboard({ partners, persistPartners, interactions, setInteractions, g
     setShowCostForm(true);
   };
   const openCostEdit = (cost) => {
-    setEditingCost({ partnerId: cost.partnerId, costId: cost.id });
+    setEditingCostId(cost.id);
     setCostDraft({
-      partnerId: cost.partnerId || "",
       date: cost.date || new Date().toISOString().slice(0,10),
       type: cost.type || "買貨",
       amount: String(cost.amount ?? ""),
@@ -501,29 +501,15 @@ function Dashboard({ partners, persistPartners, interactions, setInteractions, g
     setShowCostForm(true);
   };
   const saveCost = () => {
-    if (!costDraft.partnerId || !costDraft.amount) return;
-    const costId = editingCost?.costId || uid();
-    const nextPartners = partners.map(p => {
-      let costs = [...(p.costs || [])];
-      if (editingCost && p.id === editingCost.partnerId) costs = costs.filter(c => c.id !== editingCost.costId);
-      if (p.id === costDraft.partnerId) {
-        costs.push({
-          id: costId,
-          date: costDraft.date,
-          type: costDraft.type,
-          amount: +costDraft.amount,
-          note: costDraft.note,
-        });
-      }
-      return { ...p, costs };
-    });
-    persistPartners(nextPartners);
+    if (!costDraft.amount) return;
+    const payload = { id: editingCostId || uid(), date: costDraft.date, type: costDraft.type, amount: +costDraft.amount, note: costDraft.note };
+    const nextCosts = editingCostId ? selfCosts.map(c => c.id===editingCostId ? payload : c) : [...selfCosts, payload];
+    persistSelfCosts(nextCosts);
     setShowCostForm(false);
-    setEditingCost(null);
+    setEditingCostId("");
   };
   const deleteCost = (cost) => {
-    const nextPartners = partners.map(p => p.id===cost.partnerId ? { ...p, costs:(p.costs||[]).filter(c=>c.id!==cost.id) } : p);
-    persistPartners(nextPartners);
+    persistSelfCosts(selfCosts.filter(c=>c.id!==cost.id));
   };
 
   return (
@@ -586,7 +572,7 @@ function Dashboard({ partners, persistPartners, interactions, setInteractions, g
                   <div className="flex items-center gap-5">
                     <span style={{fontSize:9,padding:"1px 4px",borderRadius:3,border:`1px solid ${TYPE_COLOR[c.type]||"#ccc"}`,color:TYPE_COLOR[c.type]||"#888",fontFamily:"'DM Mono',monospace"}}>{c.type}</span>
                     <div>
-                      <div style={{fontSize:11,color:"var(--text2)"}}>{c.note||"支出"} <span className="mono" style={{fontSize:10,color:"var(--text3)"}}>· {c.partnerName}</span></div>
+                      <div style={{fontSize:11,color:"var(--text2)"}}>{c.note||"支出"}</div>
                       <div style={{fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{c.date}</div>
                     </div>
                   </div>
@@ -717,17 +703,14 @@ function Dashboard({ partners, persistPartners, interactions, setInteractions, g
         </Modal>
       )}
       {showCostForm&&(
-        <Modal title={editingCost?"編輯支出紀錄":"新增支出紀錄"} onClose={()=>setShowCostForm(false)}>
-          <div className="form-row">
-            <div className="form-group"><label className="label">夥伴</label><select className="input" value={costDraft.partnerId} onChange={e=>setCostDraft({...costDraft,partnerId:e.target.value})}>{nonUplinePartners.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
-            <div className="form-group"><label className="label">種類</label><select className="input" value={costDraft.type} onChange={e=>setCostDraft({...costDraft,type:e.target.value})}>{COST_TYPES.map(t=><option key={t}>{t}</option>)}</select></div>
-          </div>
+        <Modal title={editingCostId?"編輯支出紀錄":"新增支出紀錄"} onClose={()=>setShowCostForm(false)}>
+          <div className="form-group"><label className="label">種類</label><select className="input" value={costDraft.type} onChange={e=>setCostDraft({...costDraft,type:e.target.value})}>{COST_TYPES.map(t=><option key={t}>{t}</option>)}</select></div>
           <div className="form-row">
             <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={costDraft.date} onChange={e=>setCostDraft({...costDraft,date:e.target.value})}/></div>
             <div className="form-group"><label className="label">金額 (NT$)</label><input type="number" className="input" value={costDraft.amount} onChange={e=>setCostDraft({...costDraft,amount:e.target.value})}/></div>
           </div>
           <div className="form-group"><label className="label">備注</label><input className="input" value={costDraft.note} onChange={e=>setCostDraft({...costDraft,note:e.target.value})} placeholder="訂金、買貨、加盟…"/></div>
-          <div className="flex gap-8 mt-12"><button className="btn btn-gold" onClick={saveCost}>{editingCost?"儲存":"新增"}</button><button className="btn btn-ghost" onClick={()=>setShowCostForm(false)}>取消</button></div>
+          <div className="flex gap-8 mt-12"><button className="btn btn-gold" onClick={saveCost}>{editingCostId?"儲存":"新增"}</button><button className="btn btn-ghost" onClick={()=>setShowCostForm(false)}>取消</button></div>
         </Modal>
       )}
     </div>
