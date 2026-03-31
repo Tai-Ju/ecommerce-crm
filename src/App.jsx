@@ -63,12 +63,12 @@ async function save(key, val) {
 }
 
 // ─── Constants ────────────────────────────────────────────────────
-const RECRUIT_ROLES = ["未加入", "暖身中", "確定談場", "談場延期", "跟進中", "拒絕", "已加入"];
+const RECRUIT_ROLES = ["未加入", "暖身中", "確定談場", "談場延期", "跟進中", "邀約拒絕", "談後拒絕", "已加入"];
 // 非上線狀態只保留招募漏斗角色（把「夥伴」視為已加入移除重疊）
 const NON_UPLINE_ROLES = [...RECRUIT_ROLES];
 const COST_TYPES = ["訂金", "買貨", "加盟"];
 const TYPE_COLOR = { 訂金: "#4a90d9", 買貨: "#b8860b", 加盟: "#c0392b" };
-const RECRUIT_COLOR = { 未加入: "#aaa", 暖身中: "#4a90d9", 確定談場: "#b8860b", 談場延期: "#e67e22", 跟進中: "#8b5cf6", 拒絕: "#c0392b", 已加入: "#27ae60" };
+const RECRUIT_COLOR = { 未加入: "#aaa", 暖身中: "#4a90d9", 確定談場: "#b8860b", 談場延期: "#e67e22", 跟進中: "#8b5cf6", 邀約拒絕: "#c0392b", 談後拒絕: "#e74c3c", 已加入: "#27ae60" };
 
 const ABC_TEMPLATE = `C角：
 B角：
@@ -102,7 +102,7 @@ const SEED_PARTNERS = [
   { id: "p2", name: "陳威宇", role: "夥伴", avatar: "陳", phone: "0923-456-789", ig: "@weiyuchen88", birthday: "1988-07-22", tags: ["健身", "科技"], notes: "對數據很敏感，喜歡看成效報告。", costs: [{ id: "c3", date: "2024-03-05", type: "訂金", amount: 2000, note: "訂金預繳" }], abcNote: "", joined: "2024-03-05" },
   { id: "p3", name: "王思涵", role: "暖身中", avatar: "王", phone: "0934-567-890", ig: "@sihan_w", birthday: "1995-11-08", tags: ["美妝", "旅遊"], notes: "IG 粉絲約 1.2 萬，風格乾淨。", costs: [], abcNote: "", joined: "2024-05-20" },
   { id: "p4", name: "張育豪", role: "確定談場", avatar: "張", phone: "0945-678-901", ig: "@yu_hao88", birthday: "1992-06-14", tags: ["創業", "健康"], notes: "下週五約好了，準備資料。", costs: [], abcNote: ABC_TEMPLATE, joined: "2025-03-01" },
-  { id: "p5", name: "李美玲", role: "拒絕", avatar: "李", phone: "0956-789-012", ig: "@meiling_li", birthday: "1988-09-03", tags: ["家庭"], notes: "目前說不考慮，半年後再聯繫。", costs: [], abcNote: "", joined: "2025-01-15" },
+  { id: "p5", name: "李美玲", role: "邀約拒絕", avatar: "李", phone: "0956-789-012", ig: "@meiling_li", birthday: "1988-09-03", tags: ["家庭"], notes: "目前說不考慮，半年後再聯繫。", costs: [], abcNote: "", joined: "2025-01-15" },
 ];
 const SEED_INTERACTIONS = [
   { id: "i1", date: "2025-03-24", partnerId: "p2", type: "暖身", title: "Q2 業績規劃", content: "討論了四月份的推廣策略。", status: "已完成", tags: ["業績"] },
@@ -639,10 +639,10 @@ export default function App() {
   useEffect(() => {
     (async () => {
       const loadedPartners = (await load(KEYS.partners)) || SEED_PARTNERS;
-      // 兼容舊資料欄位：角色「夥伴」轉已加入，並補齊新版人脈欄位
-      setPartners(loadedPartners.map(p => ({
+      // 兼容舊資料欄位：角色「夥伴」轉已加入、舊「拒絕」轉邀約拒絕，並補齊新版人脈欄位
+      const migratedPartners = loadedPartners.map(p => ({
         ...p,
-        role: p.role === "夥伴" ? "已加入" : p.role,
+        role: p.role === "夥伴" ? "已加入" : (p.role === "拒絕" ? "邀約拒絕" : p.role),
         attribute: p.attribute || "",
         painPoint: p.painPoint || "",
         region: p.region || "",
@@ -656,7 +656,9 @@ export default function App() {
         dateTalkVenue: p.dateTalkVenue || "",
         dateTeamActivity: p.dateTeamActivity || "",
         dateWarmupPhysical: p.dateWarmupPhysical || "",
-      })));
+      }));
+      setPartners(migratedPartners);
+      if (loadedPartners.some(p => p.role === "夥伴" || p.role === "拒絕")) save(KEYS.partners, migratedPartners);
       const rawIx = (await load(KEYS.interactions)) || SEED_INTERACTIONS;
       const migratedIx = rawIx.map(i => (i.type === "討論" ? { ...i, type: "暖身" } : i));
       setInteractions(migratedIx);
@@ -732,8 +734,8 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
     persistIncomes(next);
   };
 
-  const recruitStats = ["未加入","暖身中","確定談場","談場延期","跟進中","拒絕","已加入"].map(r=>({ role:r, count:partners.filter(p=>p.role===r).length }));
-  const rcol = { 未加入:"#aaa", 暖身中:"#2563eb", 確定談場:"#b8860b", 談場延期:"#e67e22", 跟進中:"#7c3aed", 拒絕:"#c0392b", 已加入:"#27ae60" };
+  const recruitStats = ["未加入","暖身中","確定談場","談場延期","跟進中","邀約拒絕","談後拒絕","已加入"].map(r=>({ role:r, count:partners.filter(p=>p.role===r).length }));
+  const rcol = { 未加入:"#aaa", 暖身中:"#2563eb", 確定談場:"#b8860b", 談場延期:"#e67e22", 跟進中:"#7c3aed", 邀約拒絕:"#c0392b", 談後拒絕:"#e74c3c", 已加入:"#27ae60" };
 
   const totalIncome = incomes.reduce((s,i)=>s+i.amount,0);
   const totalCost = selfCosts.reduce((s,c)=>s+(+c.amount||0),0);
