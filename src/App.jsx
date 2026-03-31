@@ -434,6 +434,9 @@ const css = `
   .input:focus{border-color:var(--gold)}
   textarea.input{resize:vertical;min-height:70px}
   select.input option{background:#fff}
+  .input-compact{padding:6px 10px;font-size:12px;border-radius:7px}
+  .partner-filters-row{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;overflow-x:auto;min-width:0}
+  .partner-filters-row .input{width:110px;min-width:110px}
 
   /* ── Tags ── */
   .tag{display:inline-block;padding:2px 7px;border-radius:4px;font-size:11px;background:var(--bg3);border:1px solid var(--border);color:var(--text2);margin:2px;font-family:'DM Mono',monospace}
@@ -1195,17 +1198,17 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
         <div className="flex items-center" style={{ flexWrap: "wrap", gap: 8 }}>
           {filterGroups.map(r=><button key={r} className={`btn btn-sm ${filter===r?"btn-gold":"btn-ghost"}`} onClick={()=>setFilter(r)}>{r}</button>)}
         </div>
-        <div className="flex items-center" style={{ flexWrap: "wrap", gap: 8, justifyContent: "flex-end" }}>
-          <select className="input" style={{ minWidth: 120 }} value={fieldFilters.gender} onChange={e=>setFieldFilters({...fieldFilters,gender:e.target.value})}>
+        <div className="partner-filters-row" style={{ justifyContent: "flex-end" }}>
+          <select className="input input-compact" value={fieldFilters.gender} onChange={e=>setFieldFilters({...fieldFilters,gender:e.target.value})}>
             {(fieldOptions.gender || ["全部"]).map(v=><option key={v} value={v}>性別：{v}</option>)}
           </select>
-          <select className="input" style={{ minWidth: 120 }} value={fieldFilters.region} onChange={e=>setFieldFilters({...fieldFilters,region:e.target.value})}>
+          <select className="input input-compact" value={fieldFilters.region} onChange={e=>setFieldFilters({...fieldFilters,region:e.target.value})}>
             {(fieldOptions.region || ["全部"]).map(v=><option key={v} value={v}>地區：{v}</option>)}
           </select>
-          <select className="input" style={{ minWidth: 120 }} value={fieldFilters.attribute} onChange={e=>setFieldFilters({...fieldFilters,attribute:e.target.value})}>
+          <select className="input input-compact" value={fieldFilters.attribute} onChange={e=>setFieldFilters({...fieldFilters,attribute:e.target.value})}>
             {(fieldOptions.attribute || ["全部"]).map(v=><option key={v} value={v}>屬性：{v}</option>)}
           </select>
-          <select className="input" style={{ minWidth: 130 }} value={sortBy} onChange={e=>setSortBy(e.target.value)}>
+          <select className="input input-compact" value={sortBy} onChange={e=>setSortBy(e.target.value)}>
             <option value="default">排序：預設</option>
             <option value="region-asc">排序：地區 A→Z</option>
             <option value="region-desc">排序：地區 Z→A</option>
