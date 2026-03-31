@@ -567,7 +567,7 @@ const css = `
   .timeline-item:hover{background:var(--bg3)}
   .tl-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;margin-top:5px}
   .type-暖身{color:var(--blue)}.type-追蹤{color:var(--gold)}.type-規劃{color:var(--green)}.type-上線會議{color:var(--purple)}
-  .tl-dot.type-暖身{background:var(--blue)}.tl-dot.type-追蹤{background:var(--gold)}.tl-dot.type-規劃{background:var(--green)}.tl-dot.type-上線會議{background:var(--purple)}
+  .tl-dot.type-暖身{background:var(--blue)}.tl-dot.type-追蹤{background:var(--gold)}.tl-dot.type-規劃{background:var(--green)}.tl-dot.type-上線會議{background:var(--purple)}.tl-dot.type-談場{background:#c2410c}.tl-dot.type-團隊活動{background:#047857}.tl-dot.type-實體暖身{background:#4338ca}
   .status-badge{font-size:10px;padding:2px 6px;border-radius:4px;font-family:'DM Mono',monospace}
   .status-已完成{background:#d1fae5;color:#065f46}.status-待執行{background:var(--gold-light);color:var(--gold)}
 
@@ -600,6 +600,9 @@ const css = `
   .cal-event.type-追蹤{background:var(--gold-light);color:var(--gold)}
   .cal-event.type-規劃{background:#f0fdf4;color:var(--green)}
   .cal-event.type-上線會議{background:#f5f3ff;color:var(--purple)}
+  .cal-event.type-談場{background:#fff7ed;color:#c2410c}
+  .cal-event.type-團隊活動{background:#ecfdf5;color:#047857}
+  .cal-event.type-實體暖身{background:#eef2ff;color:#4338ca}
 
   /* ── Partner detail tabs ── */
   .detail-tab{background:none;border:none;cursor:pointer;padding:8px 14px;font-family:'Noto Serif TC',serif;font-size:13px;color:var(--text2);border-bottom:2px solid transparent;transition:all .18s}
@@ -736,6 +739,13 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
 
   const recruitStats = ["未加入","暖身中","確定談場","談場延期","跟進中","邀約拒絕","談後拒絕","已加入"].map(r=>({ role:r, count:partners.filter(p=>p.role===r).length }));
   const rcol = { 未加入:"#aaa", 暖身中:"#2563eb", 確定談場:"#b8860b", 談場延期:"#e67e22", 跟進中:"#7c3aed", 邀約拒絕:"#c0392b", 談後拒絕:"#e74c3c", 已加入:"#27ae60" };
+  const partnerTotal = partners.filter(p=>p.role!=="上線").length;
+  const timelineCounts = {
+    talk: partners.filter(p => !!p.dateTalkVenue).length,
+    warmupPhysical: partners.filter(p => !!p.dateWarmupPhysical).length,
+    teamActivity: partners.filter(p => !!p.dateTeamActivity).length,
+    meeting: interactions.filter(i => i.type === "上線會議").length,
+  };
 
   const totalIncome = incomes.reduce((s,i)=>s+i.amount,0);
   const totalCost = selfCosts.reduce((s,c)=>s+(+c.amount||0),0);
@@ -875,9 +885,12 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
         </div>
       </div>
 
-      {/* ③ 招募漏斗 — 一排，文字在上數字在下，不換行 */}
+      {/* ③ 夥伴名單 — 一排，文字在上數字在下，不換行 */}
       <div className="card" style={{padding:"14px 18px"}}>
-        <div className="subheading mb-10">🎯 招募漏斗</div>
+        <div className="flex items-center justify-between mb-10">
+          <div className="subheading" style={{margin:0}}>👥 夥伴名單</div>
+          <span style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>總數 {partnerTotal}</span>
+        </div>
         <div style={{display:"flex",gap:8,overflowX:"auto"}}>
           {recruitStats.map(s=>(
             <div key={s.role} style={{
@@ -892,7 +905,25 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
         </div>
       </div>
 
-      {/* ④ 待執行清單（來自時間軸） */}
+      {/* ④ 時間軸次數統計 */}
+      <div className="card" style={{padding:"14px 18px"}}>
+        <div className="subheading mb-10">🗓 時間軸次數統計</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8}}>
+          {[
+            { label: "談場次數", value: timelineCounts.talk, color: "#c2410c" },
+            { label: "實體暖身次數", value: timelineCounts.warmupPhysical, color: "#4338ca" },
+            { label: "團隊活動次數", value: timelineCounts.teamActivity, color: "#047857" },
+            { label: "上線會議次數", value: timelineCounts.meeting, color: "var(--purple)" },
+          ].map((s) => (
+            <div key={s.label} style={{background:"#fff",border:`1.5px solid ${s.color}44`,borderRadius:8,padding:"10px 12px"}}>
+              <div style={{fontSize:10,color:s.color,fontFamily:"'DM Mono',monospace",marginBottom:4}}>{s.label}</div>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:s.color,lineHeight:1,fontWeight:700}}>{s.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ⑤ 待執行清單（來自時間軸） */}
       <div className="card">
         <div className="flex justify-between items-center mb-12">
           <div className="subheading" style={{margin:0}}>📋 待執行清單
@@ -923,7 +954,7 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
         })}
       </div>
 
-      {/* ⑤ 各夥伴投入金費 */}
+      {/* ⑥ 各夥伴投入金費 */}
       <div className="card">
         <div className="subheading mb-12">💸 各夥伴投入金費</div>
         {partners.filter(p=>(p.costs||[]).length>0).length===0&&<div className="empty" style={{padding:"8px 0"}}>尚無成本紀錄</div>}
@@ -1661,6 +1692,39 @@ function Timeline({ interactions, setInteractions, partners }) {
   });
   const filtered = filter==="全部"?sorted:filter==="待執行"?sorted.filter(i=>i.status==="待執行"):sorted.filter(i=>i.type===filter);
   const getP = (id) => partners.find(p=>p.id===id);
+  const isYmd = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
+  const partnerScheduleItems = partners
+    .filter(p => p.role !== "上線")
+    .flatMap((p) => ([
+      p.dateTalkVenue && isYmd(p.dateTalkVenue) ? {
+        id: `ps-talk-${p.id}`,
+        date: p.dateTalkVenue,
+        partnerId: p.id,
+        type: "談場",
+        title: "談場",
+        status: "",
+        isPartnerSchedule: true,
+      } : null,
+      p.dateTeamActivity && isYmd(p.dateTeamActivity) ? {
+        id: `ps-team-${p.id}`,
+        date: p.dateTeamActivity,
+        partnerId: p.id,
+        type: "團隊活動",
+        title: "團隊活動",
+        status: "",
+        isPartnerSchedule: true,
+      } : null,
+      p.dateWarmupPhysical && isYmd(p.dateWarmupPhysical) ? {
+        id: `ps-warm-${p.id}`,
+        date: p.dateWarmupPhysical,
+        partnerId: p.id,
+        type: "實體暖身",
+        title: "實體暖身",
+        status: "",
+        isPartnerSchedule: true,
+      } : null,
+    ])).filter(Boolean);
+  const calendarItems = [...interactions, ...partnerScheduleItems];
 
   const openNew = () => { setEditData({id:uid(),date:new Date().toISOString().slice(0,10),partnerId:"",type:"暖身",title:"",content:"",status:"待執行",tags:"",partnerPlan:"",actionItems:"",quote:""}); setShowForm(true); };
   const saveItem = () => {
@@ -1705,7 +1769,7 @@ function Timeline({ interactions, setInteractions, partners }) {
     return cells;
   };
   const today=dk(new Date());
-  const iMap=interactions.reduce((acc,i)=>{ (acc[i.date]=acc[i.date]||[]).push(i); return acc; },{});
+  const iMap=calendarItems.reduce((acc,i)=>{ (acc[i.date]=acc[i.date]||[]).push(i); return acc; },{});
 
   return (
     <div>
@@ -1812,12 +1876,12 @@ function Timeline({ interactions, setInteractions, partners }) {
                     <div style={{flex:1}}>
                       <div className="flex items-center gap-6" style={{flexWrap:"wrap"}}>
                         <span style={{fontWeight:600,fontSize:13}}>{item.title}</span>
-                        <span className={`status-badge status-${item.status}`}>{item.status}</span>
+                        {!item.isPartnerSchedule && <span className={`status-badge status-${item.status}`}>{item.status}</span>}
                         <span className="tag">{item.type}</span>
                       </div>
                       <div className="text-xs mono text-muted mt-3">{item.date}{p&&<span> · {p.name}</span>}</div>
                     </div>
-                    <button className={`btn btn-sm ${item.status==="已完成"?"btn-gold":"btn-ghost"}`} style={{flexShrink:0,alignSelf:"flex-start"}} onClick={e=>{e.stopPropagation();toggle(item.id);}}>{item.status==="已完成"?"✓":"○"}</button>
+                    {!item.isPartnerSchedule && <button className={`btn btn-sm ${item.status==="已完成"?"btn-gold":"btn-ghost"}`} style={{flexShrink:0,alignSelf:"flex-start"}} onClick={e=>{e.stopPropagation();toggle(item.id);}}>{item.status==="已完成"?"✓":"○"}</button>}
                   </div>
                 );
               })}
@@ -1830,10 +1894,11 @@ function Timeline({ interactions, setInteractions, partners }) {
       {selected&&(
         <Modal title={selected.title} onClose={()=>setSelected(null)}>
           <div className="flex gap-8 mb-10">
-            <span className={`status-badge status-${selected.status}`}>{selected.status}</span>
+            {!selected.isPartnerSchedule && <span className={`status-badge status-${selected.status}`}>{selected.status}</span>}
             <span className="tag" style={selected.type==="上線會議"?{background:"#f5f3ff",borderColor:"#c4b5fd",color:"var(--purple)"}:{}}>{selected.type}</span>
           </div>
           {selected.content&&<div className="text-sm" style={{lineHeight:1.8}}>{selected.content}</div>}
+          {selected.isPartnerSchedule&&<div className="text-sm text-muted">來源：人脈基本資料日期欄位</div>}
           {selected.type==="上線會議"&&mergeMeetingPlanFields(selected.partnerPlan, selected.actionItems)&&(
             <div className="card-sm mt-10"><div className="label">具體規劃與待辦</div><div className="text-sm mt-5" style={{lineHeight:1.8,whiteSpace:"pre-wrap"}}>{mergeMeetingPlanFields(selected.partnerPlan, selected.actionItems)}</div></div>
           )}
@@ -1846,10 +1911,12 @@ function Timeline({ interactions, setInteractions, partners }) {
           {selected.type!=="上線會議"&&selected.partnerId&&<div className="mt-8 text-sm text-muted">夥伴：{getP(selected.partnerId)?.name}</div>}
           <div className="mono text-xs text-muted mt-8">{selected.date}</div>
           <div className="divider"/>
-          <div className="flex gap-8">
-            <button className="btn btn-gold btn-sm" onClick={()=>{ setSelected(null); setEditData({...selected,tags:Array.isArray(selected.tags)?selected.tags.join("、"):selected.tags,partnerPlan:selected.type==="上線會議"?mergeMeetingPlanFields(selected.partnerPlan,selected.actionItems):(selected.partnerPlan||""),actionItems:selected.type==="上線會議"?"":(selected.actionItems||""),quote:selected.quote||""}); setShowForm(true); }}>編輯</button>
-            <button className="btn btn-danger btn-sm" onClick={()=>del(selected.id)}>刪除</button>
-          </div>
+          {!selected.isPartnerSchedule && (
+            <div className="flex gap-8">
+              <button className="btn btn-gold btn-sm" onClick={()=>{ setSelected(null); setEditData({...selected,tags:Array.isArray(selected.tags)?selected.tags.join("、"):selected.tags,partnerPlan:selected.type==="上線會議"?mergeMeetingPlanFields(selected.partnerPlan,selected.actionItems):(selected.partnerPlan||""),actionItems:selected.type==="上線會議"?"":(selected.actionItems||""),quote:selected.quote||""}); setShowForm(true); }}>編輯</button>
+              <button className="btn btn-danger btn-sm" onClick={()=>del(selected.id)}>刪除</button>
+            </div>
+          )}
         </Modal>
       )}
 
