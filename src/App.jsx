@@ -64,7 +64,7 @@ async function save(key, val) {
 }
 
 // ─── Constants ────────────────────────────────────────────────────
-const RECRUIT_ROLES = ["未加入", "暖身中", "確定談場", "談場延期", "跟進中", "已付訂金", "邀約拒絕", "談後拒絕", "已加入"];
+const RECRUIT_ROLES = ["邀約拒絕", "談後拒絕", "未加入", "暖身中", "確定談場", "談場延期", "跟進中", "已付訂金", "已加入"];
 // 非上線狀態只保留招募漏斗角色（把「夥伴」視為已加入移除重疊）
 const NON_UPLINE_ROLES = [...RECRUIT_ROLES];
 const COST_TYPES = ["訂金", "買貨", "加盟"];
@@ -424,35 +424,41 @@ function meetingPlanLinesForActions(planText) {
   return String(planText || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
 }
 
-/** 上線會議「具體規劃與待辦」中若出現人脈姓名，為其餘夥伴各建立一筆互動摘要（主關聯夥伴已有人脈內完整會議紀錄，不重複） */
-function buildPartnerPlanSyncEntries(meeting, partners) {
+function getUnmatchedMeetingPlanLines(planText, partners) {
+  const lines = meetingPlanLinesForActions(planText);
+  if (lines.length === 0) return [];
+  const pool = partners.filter(p => p.role !== "上線" && p.name);
+  if (pool.length === 0) return lines;
+  const ordered = [...pool].sort((a, b) => b.name.length - a.name.length);
+  return lines.filter(line => !ordered.some(p => line.includes(p.name)));
+}
+
+/** 上線會議：具體規劃與待辦「一行一項」各建立一筆規劃互動；行內含人脈姓名則掛該夥伴，否則為個人行程（無夥伴） */
+function buildMeetingPlanLineEntries(meeting, partners) {
   if (meeting.type !== "上線會議") return [];
   const plan = String(mergeMeetingPlanFields(meeting.partnerPlan, meeting.actionItems)).trim();
   if (!plan) return [];
+  const lines = plan.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const pool = partners.filter(p => p.role !== "上線" && p.name);
   const ordered = [...pool].sort((a, b) => b.name.length - a.name.length);
-  const mentioned = [];
-  for (const p of ordered) {
-    if (!plan.includes(p.name)) continue;
-    if (meeting.partnerId && p.id === meeting.partnerId) continue;
-    if (mentioned.some(m => m.id === p.id)) continue;
-    mentioned.push(p);
-  }
-  if (mentioned.length === 0) return [];
-  const lines = plan.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const titleBase = meeting.title || "上線會議";
-  return mentioned.map(p => {
-    const relevant = lines.filter(l => l.includes(p.name));
-    const excerpt = relevant.length > 0 ? relevant.join("\n") : plan;
+  const prefix = `來自上線會議「${titleBase}」的行動項目`;
+  const t = meeting.time != null && String(meeting.time).trim() !== "" ? normalizeTime(meeting.time) : "00:00:00";
+  return lines.map(line => {
+    let partnerId = "";
+    for (const p of ordered) {
+      if (line.includes(p.name)) { partnerId = p.id; break; }
+    }
     return {
       id: uid(),
       date: meeting.date,
-      partnerId: p.id,
+      time: t,
+      partnerId,
       type: "規劃",
-      title: `【上線會議】${titleBase}`,
-      content: `來自上線會議「${titleBase}」— 針對「${p.name}」的規劃：\n${excerpt}`,
+      title: line,
+      content: prefix,
       status: meeting.status === "已完成" ? "已完成" : "待執行",
-      tags: ["上線會議", "規劃同步"],
+      tags: ["上線會議"],
       partnerPlan: "",
       actionItems: "",
       quote: "",
@@ -760,7 +766,7 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
     persistIncomes(next);
   };
 
-  const recruitStats = ["未加入","暖身中","確定談場","談場延期","跟進中","已付訂金","邀約拒絕","談後拒絕","已加入"].map(r=>({ role:r, count:partners.filter(p=>p.role===r).length }));
+  const recruitStats = ["邀約拒絕","談後拒絕","未加入","暖身中","確定談場","談場延期","跟進中","已付訂金","已加入"].map(r=>({ role:r, count:partners.filter(p=>p.role===r).length }));
   const rcol = { 未加入:"#aaa", 暖身中:"#2563eb", 確定談場:"#b8860b", 談場延期:"#e67e22", 跟進中:"#7c3aed", 已付訂金:"#f59e0b", 邀約拒絕:"#c0392b", 談後拒絕:"#e74c3c", 已加入:"#27ae60" };
   const partnerTotal = partners.filter(p=>p.role!=="上線").length;
   const interactionScheduleSet = new Set(
@@ -1291,7 +1297,14 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
   };
   const partnerInteractions = selected
     ? interactions
-        .filter(i => i.partnerId === selected.id)
+        .filter(i => {
+          if (i.partnerId === selected.id) return true;
+          if (i.type === "上線會議" && !i.partnerId) {
+            const plan = mergeMeetingPlanFields(i.partnerPlan, i.actionItems);
+            return selected.name && plan.includes(selected.name);
+          }
+          return false;
+        })
         .sort((a, b) => {
           const todayMs = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00").getTime();
           const toMs = (s) => new Date(s + "T00:00:00").getTime();
@@ -1328,7 +1341,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     setInteractionEditMode("edit");
     setInteractionDraft({
       ...it,
-      partnerId: selected?.id || it.partnerId,
+      partnerId: it.type === "上線會議" ? (it.partnerId || "") : (selected?.id || it.partnerId),
       time: it.time ? normalizeTime(it.time) : "00:00:00",
       tags: Array.isArray(it.tags) ? it.tags.join("、") : (it.tags || ""),
       partnerPlan: it.type === "上線會議" ? mergeMeetingPlanFields(it.partnerPlan, it.actionItems) : (it.partnerPlan || ""),
@@ -1344,9 +1357,9 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     let next = interactions.filter(i=>i.id!==id);
     // 若刪除上線會議，連帶刪除它自動產生的 規劃 行動項目（避免殘留）
     if (target?.type === "上線會議") {
-      const prefix = `來自上線會議「${target.title}」的行動項目`;
-      next = next.filter(i => !(i.type === "規劃" && i.partnerId === selected.id && i.content === prefix));
       next = removeInteractionsSyncedFromMeeting(next, id);
+      const prefix = `來自上線會議「${target.title}」的行動項目`;
+      next = next.filter(i => !(i.type === "規劃" && i.content === prefix && (i.fromMeetingId === id || (!i.fromMeetingId && i.partnerId === selected.id))));
     }
     setInteractions(next);
     setShowInteractionForm(false);
@@ -1355,8 +1368,15 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
   const saveInteraction = () => {
     if (!selected || !interactionDraft) return;
     const tagsArr = normalizeTags(interactionDraft.tags);
-    const entry = { ...interactionDraft, time: normalizeTime(interactionDraft.time), tags: tagsArr, partnerId: selected.id };
+    const entry = { ...interactionDraft, time: normalizeTime(interactionDraft.time), tags: tagsArr, partnerId: interactionDraft.type === "上線會議" ? "" : selected.id };
     if (entry.type === "上線會議") entry.actionItems = "";
+    if (entry.type === "上線會議") {
+      const unmatched = getUnmatchedMeetingPlanLines(entry.partnerPlan, partners);
+      if (unmatched.length > 0) {
+        const ok = window.confirm(`以下 ${unmatched.length} 行未匹配到夥伴姓名，將不會同步到特定夥伴，但仍會保留在行程紀錄：\n\n- ${unmatched.join("\n- ")}\n\n是否仍要儲存？`);
+        if (!ok) return;
+      }
+    }
 
     // 新增/編輯互動主紀錄
     const hasId = interactions.some(i=>i.id===entry.id);
@@ -1364,29 +1384,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
 
     if (entry.type === "上線會議") {
       next = removeInteractionsSyncedFromMeeting(next, entry.id);
-      next = [...next, ...buildPartnerPlanSyncEntries(entry, partners)];
-    }
-
-    // 上線會議：同一欄位內「一行一項」新增時自動拆成待執行規劃（寫在 partnerPlan）
-    if (interactionEditMode === "new" && entry.type === "上線會議") {
-      const lines = meetingPlanLinesForActions(entry.partnerPlan);
-      if (lines.length) {
-        const prefix = `來自上線會議「${entry.title}」的行動項目`;
-        const newItems = lines.map(l => ({
-          id: uid(),
-          date: entry.date,
-          partnerId: selected.id,
-          type: "規劃",
-          title: l,
-          content: prefix,
-          status: "待執行",
-          tags: ["上線會議"],
-          partnerPlan: "",
-          actionItems: "",
-          quote: "",
-        }));
-        next = [...next, ...newItems];
-      }
+      next = [...next, ...buildMeetingPlanLineEntries(entry, partners)];
     }
 
     setInteractions(next);
@@ -1631,7 +1629,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             <>
               <div className="form-group"><label className="label">討論主題 / 結論</label><textarea className="input" style={{minHeight:80}} value={interactionDraft.content||""} onChange={e=>setInteractionDraft({...interactionDraft,content:e.target.value})}/></div>
               <div className="form-group"><label className="label">具體規劃與待辦（一行一項）</label><textarea className="input" style={{minHeight:120,fontFamily:"'DM Mono',monospace",fontSize:12}} value={interactionDraft.partnerPlan||""} onChange={e=>setInteractionDraft({...interactionDraft,partnerPlan:e.target.value})} placeholder={"王思涵：本週約談場\n幫陳威宇整理獎金說明"}/>
-                <div className="text-xs text-muted mt-6" style={{lineHeight:1.6}}>每行會自動成為一筆待執行規劃；若行內含人脈「姓名」（須與人脈網絡相同），儲存後也會同步到對方互動紀錄。在此夥伴下建立上線會議時，此夥伴已有主紀錄，不另產生子項目。</div>
+                <div className="text-xs text-muted mt-6" style={{lineHeight:1.6}}>上線會議主紀錄不綁定單一夥伴；每行會成為一筆待執行「規劃」。行內含人脈「姓名」（須與人脈網絡相同）者會掛到該夥伴，否則為個人行程。計畫中有出現本夥伴姓名時，該筆會議也會列在這裡。</div>
               </div>
               <div className="form-group"><label className="label">上線金句 / 激勵話語</label><input className="input" value={interactionDraft.quote||""} onChange={e=>setInteractionDraft({...interactionDraft,quote:e.target.value})}/></div>
             </>
@@ -1919,20 +1917,24 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
 
   const openNew = () => { setEditData({id:uid(),date:new Date().toISOString().slice(0,10),time:nowHms(),partnerId:"",type:"暖身",title:"暖身",content:"",status:"待執行",tags:"",partnerPlan:"",actionItems:"",quote:""}); setPartnerSearch(""); setShowForm(true); };
   const saveItem = () => {
-    const entry = { ...editData, time: normalizeTime(editData.time), tags: editData.tags ? editData.tags.split(/[、,，]/).map(t => t.trim()).filter(Boolean) : [] };
+    const entry = {
+      ...editData,
+      time: normalizeTime(editData.time),
+      tags: editData.tags ? editData.tags.split(/[、,，]/).map(t => t.trim()).filter(Boolean) : [],
+      partnerId: editData.type === "上線會議" ? "" : (editData.partnerId || ""),
+    };
     if (entry.type === "上線會議") entry.actionItems = "";
+    if (entry.type === "上線會議") {
+      const unmatched = getUnmatchedMeetingPlanLines(entry.partnerPlan, partners);
+      if (unmatched.length > 0) {
+        const ok = window.confirm(`以下 ${unmatched.length} 行未匹配到夥伴姓名，將不會同步到特定夥伴，但仍會保留在行程紀錄：\n\n- ${unmatched.join("\n- ")}\n\n是否仍要儲存？`);
+        if (!ok) return;
+      }
+    }
     let next = interactions.find(i => i.id === entry.id) ? interactions.map(i => i.id === entry.id ? entry : i) : [...interactions, entry];
     if (entry.type === "上線會議") {
       next = removeInteractionsSyncedFromMeeting(next, entry.id);
-      next = [...next, ...buildPartnerPlanSyncEntries(entry, partners)];
-    }
-    const isNewMeeting = !interactions.some(i => i.id === editData.id);
-    if (editData.type === "上線會議" && isNewMeeting) {
-      const lines = meetingPlanLinesForActions(entry.partnerPlan);
-      if (lines.length) {
-        const newItems = lines.map(l => ({ id: uid(), date: editData.date, partnerId: entry.partnerId || "", type: "規劃", title: l, content: `來自上線會議「${editData.title}」的行動項目`, status: "待執行", tags: ["上線會議"], partnerPlan: "", actionItems: "", quote: "" }));
-        next = [...next, ...newItems];
-      }
+      next = [...next, ...buildMeetingPlanLineEntries(entry, partners)];
     }
     const field = scheduleFieldForType(entry.type);
     if (field && entry.partnerId) {
@@ -2194,7 +2196,12 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
                   const isEditing = interactions.some(i => i.id === prev.id);
                   const currentTitle = String(prev.title || "").trim();
                   const shouldAutoFillTitle = !isEditing || !currentTitle || currentTitle === prev.type;
-                  return { ...prev, type: nextType, title: shouldAutoFillTitle ? nextType : prev.title };
+                  return {
+                    ...prev,
+                    type: nextType,
+                    title: shouldAutoFillTitle ? nextType : prev.title,
+                    partnerId: nextType === "上線會議" ? "" : prev.partnerId,
+                  };
                 })}
               >
                 {["暖身","追蹤","規劃","上線會議","談場","團隊活動","實體暖身","產品課程","新人啟動"].map(t=><option key={t}>{t}</option>)}
@@ -2204,14 +2211,16 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
           <div className="form-group"><label className="label">標題 *</label><input className="input" value={editData.title} onChange={e=>setEditData({...editData,title:e.target.value})} placeholder={editData.type==="上線會議"?"例：04/05 與林佳蓉討論四月計畫":""}/>
           </div>
 
-          <div className="form-group">
-            <label className="label">關聯夥伴</label>
-            <input className="input" value={partnerSearch} onChange={e=>setPartnerSearch(e.target.value)} placeholder="輸入姓名關鍵字篩選"/>
-            <select className="input mt-6" value={editData.partnerId} onChange={e=>setEditData({...editData,partnerId:e.target.value})}>
-              <option value="">（無）</option>
-              {filteredPartnerOptions.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </div>
+          {editData.type !== "上線會議" && (
+            <div className="form-group">
+              <label className="label">關聯夥伴</label>
+              <input className="input" value={partnerSearch} onChange={e=>setPartnerSearch(e.target.value)} placeholder="輸入姓名關鍵字篩選"/>
+              <select className="input mt-6" value={editData.partnerId} onChange={e=>setEditData({...editData,partnerId:e.target.value})}>
+                <option value="">（無）</option>
+                {filteredPartnerOptions.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+          )}
 
           {/* 上線會議專屬欄位 */}
           {editData.type==="上線會議"?(
@@ -2219,7 +2228,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
               <div className="subheading" style={{color:"var(--purple)",marginBottom:10}}>🟣 上線會議專屬紀錄</div>
               <div className="form-group"><label className="label">討論主題 / 結論</label><textarea className="input" style={{minHeight:80}} value={editData.content||""} onChange={e=>setEditData({...editData,content:e.target.value})} placeholder="今天討論了什麼？結論是什麼？"/></div>
               <div className="form-group"><label className="label">具體規劃與待辦（一行一項）</label><textarea className="input" style={{minHeight:120,fontFamily:"'DM Mono',monospace",fontSize:12}} value={editData.partnerPlan||""} onChange={e=>setEditData({...editData,partnerPlan:e.target.value})} placeholder={"王思涵：本週約談場\n幫陳威宇整理獎金說明"}/>
-                <div className="text-xs text-muted mt-6" style={{lineHeight:1.6}}>每行成為一筆待執行規劃；行內含人脈姓名者會同步到對方互動紀錄（姓名須與人脈網絡一致）。</div>
+                <div className="text-xs text-muted mt-6" style={{lineHeight:1.6}}>上線會議不綁定關聯夥伴；每行會成為一筆待執行「規劃」。行內含人脈姓名者會掛到該夥伴互動，否則為個人行程（仍顯示於時間軸／月曆）。</div>
               </div>
               <div className="form-group"><label className="label">上線給的金句 / 激勵話語</label><input className="input" value={editData.quote||""} onChange={e=>setEditData({...editData,quote:e.target.value})} placeholder="例：做不到不是能力問題，是還沒找到對的方式"/></div>
             </div>
