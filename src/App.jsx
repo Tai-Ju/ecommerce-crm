@@ -1957,7 +1957,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
                     const p=getP(it.partnerId);
                     return (
                       <div key={it.id} className={`cal-event type-${it.type}`} onClick={()=>setSelected(it)} title={`${it.title} ${p?`· ${p.name}`:""} ${it.date} ${normalizeTime(it.time)}`}>
-                        {normalizeTime(it.time)} {it.title}{p?` · ${p.name}`:""}
+                        {it.title}{p?` · ${p.name}`:""}
                       </div>
                     );
                   })}
