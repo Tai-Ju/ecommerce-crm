@@ -437,6 +437,7 @@ const css = `
   .input-compact{padding:6px 10px;font-size:12px;border-radius:7px}
   .partner-filters-row{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;overflow-x:auto;min-width:0}
   .partner-filters-row .input{width:110px;min-width:110px}
+  .playbook-text{white-space:pre-wrap;word-break:break-word}
 
   /* ── Tags ── */
   .tag{display:inline-block;padding:2px 7px;border-radius:4px;font-size:11px;background:var(--bg3);border:1px solid var(--border);color:var(--text2);margin:2px;font-family:'DM Mono',monospace}
@@ -1827,7 +1828,7 @@ function Playbook({ playbook, setPlaybook }) {
                     {item.category&&<span className="tag tag-gold">{item.category}</span>}
                     {(Array.isArray(item.tags)?item.tags:[]).map(t=><span key={t} className="tag">{t}</span>)}
                   </div>
-                  <div style={{fontWeight:600,fontSize:13}}>💬 {item.situation}</div>
+                  <div className="playbook-text" style={{fontWeight:600,fontSize:13}}>💬 {item.situation}</div>
                 </div>
               </div>
               <span style={{color:"var(--text3)",flexShrink:0,fontSize:12}}>{expanded===item.id?"▲":"▼"}</span>
@@ -1836,7 +1837,7 @@ function Playbook({ playbook, setPlaybook }) {
               <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid var(--border)"}}>
                 <div className="subheading mb-5">建議回應</div>
                 <div className="card-sm" style={{borderLeft:"3px solid var(--gold)",borderRadius:"0 8px 8px 0"}}>
-                  <div style={{fontSize:13,lineHeight:1.9}}>{item.response}</div>
+                  <div className="playbook-text" style={{fontSize:13,lineHeight:1.9}}>{item.response}</div>
                 </div>
                 <div className="flex gap-8 mt-10">
                   <button className="btn btn-ghost btn-sm" onClick={e=>{e.stopPropagation();setDraft({...item,tags:Array.isArray(item.tags)?item.tags.join("、"):item.tags});setShowForm(true);}}>編輯</button>
