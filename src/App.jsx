@@ -370,8 +370,21 @@ export default function App() {
   useEffect(() => {
     (async () => {
       const loadedPartners = (await load(KEYS.partners)) || SEED_PARTNERS;
-      // 兼容：舊資料可能把「夥伴」當作身分/狀態，這版把它視為「已加入」移除重疊
-      setPartners(loadedPartners.map(p => ({ ...p, role: p.role === "夥伴" ? "已加入" : p.role })));
+      // 兼容舊資料欄位：角色「夥伴」轉已加入，並補齊新版人脈欄位
+      setPartners(loadedPartners.map(p => ({
+        ...p,
+        role: p.role === "夥伴" ? "已加入" : p.role,
+        attribute: p.attribute || "",
+        painPoint: p.painPoint || "",
+        region: p.region || "",
+        vacation: p.vacation || "",
+        memo: p.memo || p.notes || "",
+        gender: p.gender || "",
+        relation: p.relation || "",
+        age: p.age ?? "",
+        occupation: p.occupation || "",
+        salary: p.salary ?? "",
+      })));
       const rawIx = (await load(KEYS.interactions)) || SEED_INTERACTIONS;
       const migratedIx = rawIx.map(i => (i.type === "討論" ? { ...i, type: "暖身" } : i));
       setInteractions(migratedIx);
@@ -724,6 +737,20 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
   const [showForm, setShowForm] = useState(false);
   const [editData, setEditData] = useState(null);
   const [filter, setFilter] = useState("全部");
+  const [sortBy, setSortBy] = useState("name-asc");
+  const [fieldFilters, setFieldFilters] = useState({
+    name: "全部",
+    attribute: "全部",
+    painPoint: "全部",
+    region: "全部",
+    vacation: "全部",
+    memo: "全部",
+    gender: "全部",
+    relation: "全部",
+    age: "全部",
+    occupation: "全部",
+    salary: "全部",
+  });
   const [copied, setCopied] = useState(false);
 
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -735,7 +762,43 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
 
   const nonUplines = partners.filter(p=>p.role!=="上線");
   const filterGroups = ["全部",...RECRUIT_ROLES];
-  const filtered = filter==="全部" ? nonUplines : nonUplines.filter(p=>p.role===filter);
+  const filterableFields = [
+    { key: "name", label: "姓名" },
+    { key: "gender", label: "性別" },
+    { key: "relation", label: "關係" },
+    { key: "age", label: "年齡" },
+    { key: "occupation", label: "職業" },
+    { key: "salary", label: "薪資" },
+    { key: "attribute", label: "屬性" },
+    { key: "painPoint", label: "痛點需求" },
+    { key: "region", label: "地區" },
+    { key: "vacation", label: "休假" },
+    { key: "memo", label: "備註" },
+  ];
+  const getFieldValue = (p, key) => String(p?.[key] ?? "").trim() || "—";
+  const fieldOptions = filterableFields.reduce((acc, f) => {
+    const vals = Array.from(new Set(nonUplines.map(p => getFieldValue(p, f.key)).filter(v => v !== "—")));
+    acc[f.key] = ["全部", ...vals.sort((a,b)=>a.localeCompare(b,"zh-Hant"))];
+    return acc;
+  }, {});
+  const filtered = nonUplines
+    .filter(p => filter==="全部" ? true : p.role===filter)
+    .filter(p => filterableFields.every(f => {
+      const fv = fieldFilters[f.key];
+      return fv === "全部" ? true : getFieldValue(p, f.key) === fv;
+    }))
+    .sort((a, b) => {
+      const n = (v) => Number(v || 0);
+      if (sortBy === "name-asc") return String(a.name||"").localeCompare(String(b.name||""), "zh-Hant");
+      if (sortBy === "name-desc") return String(b.name||"").localeCompare(String(a.name||""), "zh-Hant");
+      if (sortBy === "age-asc") return n(a.age) - n(b.age);
+      if (sortBy === "age-desc") return n(b.age) - n(a.age);
+      if (sortBy === "salary-asc") return n(a.salary) - n(b.salary);
+      if (sortBy === "salary-desc") return n(b.salary) - n(a.salary);
+      if (sortBy === "joined-desc") return String(b.joined||"").localeCompare(String(a.joined||""));
+      if (sortBy === "joined-asc") return String(a.joined||"").localeCompare(String(b.joined||""));
+      return 0;
+    });
 
   const resizeImageToAvatarDataUrl = async (file, { maxDim=256, quality=0.78 } = {}) => {
     const readAsDataUrl = (f) => new Promise((resolve, reject) => {
@@ -787,19 +850,34 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     }
   };
 
-  const openNew = () => { setEditData({id:uid(),name:"",role:"暖身中",avatar:"",photo:"",phone:"",ig:"",birthday:"",tags:"",notes:"",costs:[],abcNote:ABC_TEMPLATE,joined:new Date().toISOString().slice(0,10)}); setShowForm(true); };
+  const openNew = () => { setEditData({id:uid(),name:"",role:"暖身中",avatar:"",photo:"",attribute:"",painPoint:"",region:"",vacation:"",memo:"",gender:"",relation:"",age:"",occupation:"",salary:"",costs:[],abcNote:ABC_TEMPLATE,joined:new Date().toISOString().slice(0,10)}); setShowForm(true); };
   const openEdit = (p) => {
     const nextRole = p.role === "夥伴" ? "已加入" : p.role;
     setEditData({
       ...p,
       role: nextRole,
-      tags: Array.isArray(p.tags) ? p.tags.join("、") : (p.tags || ""),
+      attribute: p.attribute || "",
+      painPoint: p.painPoint || "",
+      region: p.region || "",
+      vacation: p.vacation || "",
+      memo: p.memo || p.notes || "",
+      gender: p.gender || "",
+      relation: p.relation || "",
+      age: p.age ?? "",
+      occupation: p.occupation || "",
+      salary: p.salary ?? "",
       abcNote: p.abcNote || "",
     });
     setShowForm(true);
   };
   const saveP = () => {
-    const entry={...editData,tags:editData.tags?editData.tags.split(/[、,，]/).map(t=>t.trim()).filter(Boolean):[],avatar:editData.avatar||editData.name[0]||"?",photo:editData.photo||""};
+    const entry={
+      ...editData,
+      avatar:editData.avatar||editData.name[0]||"?",
+      photo:editData.photo||"",
+      age: editData.age === "" ? "" : +editData.age,
+      salary: editData.salary === "" ? "" : +editData.salary,
+    };
     const next=partners.find(p=>p.id===entry.id)?partners.map(p=>p.id===entry.id?entry:p):[...partners,entry];
     setPartners(next); setShowForm(false);
   };
@@ -934,6 +1012,31 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       <div className="flex gap-8 mb-14" style={{flexWrap:"wrap"}}>
         {filterGroups.map(r=><button key={r} className={`btn btn-sm ${filter===r?"btn-gold":"btn-ghost"}`} onClick={()=>setFilter(r)}>{r}</button>)}
       </div>
+      <div className="grid-3 mb-14">
+        <div>
+          <div className="label">排序</div>
+          <select className="input" value={sortBy} onChange={e=>setSortBy(e.target.value)}>
+            <option value="name-asc">姓名 A→Z</option>
+            <option value="name-desc">姓名 Z→A</option>
+            <option value="age-asc">年齡 小→大</option>
+            <option value="age-desc">年齡 大→小</option>
+            <option value="salary-desc">薪資 高→低</option>
+            <option value="salary-asc">薪資 低→高</option>
+            <option value="joined-desc">加入 新→舊</option>
+            <option value="joined-asc">加入 舊→新</option>
+          </select>
+        </div>
+      </div>
+      <div className="grid-3 mb-16">
+        {filterableFields.map(f=>(
+          <div key={f.key}>
+            <div className="label">{f.label} 篩選</div>
+            <select className="input" value={fieldFilters[f.key]} onChange={e=>setFieldFilters({...fieldFilters,[f.key]:e.target.value})}>
+              {(fieldOptions[f.key] || ["全部"]).map(v=><option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+        ))}
+      </div>
       <div className="grid-3">
         {filtered.map(p=>(
           <div key={p.id} className="partner-card" onClick={()=>{setSelected(p);setDetailTab("info");}}>
@@ -946,8 +1049,13 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
                 <div style={{marginTop:4}}>{roleBadge(p.role)}</div>
               </div>
             </div>
-            {p.tags?.length>0&&<div className="mb-6">{(Array.isArray(p.tags)?p.tags:p.tags.split("、")).map(t=><span key={t} className="tag">{t}</span>)}</div>}
-            {p.ig&&<div className="text-xs text-muted mono mb-4">{p.ig}</div>}
+            <div className="mb-6" style={{display:"flex",flexWrap:"wrap",gap:4}}>
+              {p.gender&&<span className="tag">{p.gender}</span>}
+              {p.relation&&<span className="tag">{p.relation}</span>}
+              {p.region&&<span className="tag">{p.region}</span>}
+              {p.occupation&&<span className="tag">{p.occupation}</span>}
+            </div>
+            <div className="text-xs text-muted mono mb-4">年齡 {p.age||"—"} · 薪資 {p.salary?`NT$${(+p.salary).toLocaleString()}`:"—"}</div>
             {(p.costs||[]).length>0&&<div className="mono mt-4" style={{fontSize:11,color:"var(--red)"}}>投入 NT${(p.costs||[]).reduce((a,c)=>a+c.amount,0).toLocaleString()}</div>}
             {p.abcNote&&p.abcNote!==ABC_TEMPLATE&&<div className="tag tag-gold" style={{marginTop:6,display:"inline-block"}}>📋 已有ABC單</div>}
             <div className="flex gap-6 mt-10" onClick={e=>e.stopPropagation()}>
@@ -973,7 +1081,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
 
           {/* Tabs */}
           <div className="flex" style={{borderBottom:"1.5px solid var(--border)",marginBottom:16}}>
-            {[["info","📋 基本資料"],["abc","⭐ ABC單"],["cost","💸 金費"],["log","🗓 互動"]].map(([id,label])=>(
+            {[["info","📋 基本資料"],["log","🗓 互動"],["abc","⭐ ABC單"],["cost","💸 金費"]].map(([id,label])=>(
               <button key={id} className={`detail-tab${detailTab===id?" active":""}`} onClick={()=>setDetailTab(id)}>{label}</button>
             ))}
           </div>
@@ -982,12 +1090,11 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
           {detailTab==="info"&&(
             <div>
               <div className="grid-2 mb-10">
-                {[["📱 電話",selected.phone],["📸 IG",selected.ig],["🎂 生日",selected.birthday?fmt(selected.birthday):"—"],["📅 加入名單",selected.joined?fmt(selected.joined):"—"]].map(([l,v])=>(
+                {[["👤 屬性",selected.attribute],["⚠ 痛點需求",selected.painPoint],["🧭 地區",selected.region],["🛌 休假",selected.vacation],["⚧ 性別",selected.gender],["🤝 關係",selected.relation],["🎂 年齡",selected.age||"—"],["💼 職業",selected.occupation],["💰 薪資",selected.salary?`NT$${(+selected.salary).toLocaleString()}`:"—"],["📅 加入名單",selected.joined?fmt(selected.joined):"—"]].map(([l,v])=>(
                   <div key={l}><div className="label">{l}</div><div className="text-sm">{v||"—"}</div></div>
                 ))}
               </div>
-              {selected.tags?.length>0&&<div className="mb-10">{(Array.isArray(selected.tags)?selected.tags:[]).map(t=><span key={t} className="tag tag-gold">{t}</span>)}</div>}
-              {selected.notes&&<div className="card-sm"><div className="label">備注</div><div className="text-sm mt-6" style={{lineHeight:1.8}}>{selected.notes}</div></div>}
+              {selected.memo&&<div className="card-sm"><div className="label">備註</div><div className="text-sm mt-6" style={{lineHeight:1.8}}>{selected.memo}</div></div>}
               <div className="flex gap-8 mt-14">
                 <button className="btn btn-gold btn-sm" onClick={()=>{setSelected(null);openEdit(selected);}}>✏️ 編輯資料</button>
                 <button className="btn btn-danger btn-sm" onClick={()=>del(selected.id)}>刪除</button>
@@ -1095,11 +1202,22 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             </div>
           </div>
           <div className="form-row">
-            <div className="form-group"><label className="label">電話</label><input className="input" value={editData.phone} onChange={e=>setEditData({...editData,phone:e.target.value})}/></div>
-            <div className="form-group"><label className="label">IG 帳號</label><input className="input" value={editData.ig} onChange={e=>setEditData({...editData,ig:e.target.value})}/></div>
+            <div className="form-group"><label className="label">屬性</label><input className="input" value={editData.attribute} onChange={e=>setEditData({...editData,attribute:e.target.value})}/></div>
+            <div className="form-group"><label className="label">痛點需求</label><input className="input" value={editData.painPoint} onChange={e=>setEditData({...editData,painPoint:e.target.value})}/></div>
           </div>
-          <div className="form-group"><label className="label">生日</label><input type="date" className="input" value={editData.birthday} onChange={e=>setEditData({...editData,birthday:e.target.value})}/></div>
-          <div className="form-group"><label className="label">標籤（逗號分隔）</label><input className="input" value={editData.tags} onChange={e=>setEditData({...editData,tags:e.target.value})} placeholder="健康、媽媽圈…"/></div>
+          <div className="form-row">
+            <div className="form-group"><label className="label">地區</label><input className="input" value={editData.region} onChange={e=>setEditData({...editData,region:e.target.value})}/></div>
+            <div className="form-group"><label className="label">休假</label><input className="input" value={editData.vacation} onChange={e=>setEditData({...editData,vacation:e.target.value})}/></div>
+          </div>
+          <div className="form-row">
+            <div className="form-group"><label className="label">性別</label><input className="input" value={editData.gender} onChange={e=>setEditData({...editData,gender:e.target.value})}/></div>
+            <div className="form-group"><label className="label">關係</label><input className="input" value={editData.relation} onChange={e=>setEditData({...editData,relation:e.target.value})}/></div>
+          </div>
+          <div className="form-row">
+            <div className="form-group"><label className="label">年齡</label><input type="number" className="input" value={editData.age} onChange={e=>setEditData({...editData,age:e.target.value})}/></div>
+            <div className="form-group"><label className="label">職業</label><input className="input" value={editData.occupation} onChange={e=>setEditData({...editData,occupation:e.target.value})}/></div>
+          </div>
+          <div className="form-group"><label className="label">薪資</label><input type="number" className="input" value={editData.salary} onChange={e=>setEditData({...editData,salary:e.target.value})}/></div>
           <div className="form-group">
             <label className="label">上傳照片（可選）</label>
             {editData.photo && (
@@ -1120,7 +1238,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             {photoError && <div className="text-xs" style={{color:"var(--red)",marginTop:6}}>{photoError}</div>}
             <div className="text-xs text-muted mt-4">照片會存到資料庫；建議選擇小檔並以頭像用途為主。</div>
           </div>
-          <div className="form-group"><label className="label">備注 / 喜好</label><textarea className="input" value={editData.notes} onChange={e=>setEditData({...editData,notes:e.target.value})}/></div>
+          <div className="form-group"><label className="label">備註</label><textarea className="input" value={editData.memo} onChange={e=>setEditData({...editData,memo:e.target.value})}/></div>
           <div className="flex gap-8 mt-8"><button className="btn btn-gold" onClick={saveP}>儲存</button><button className="btn btn-ghost" onClick={()=>setShowForm(false)}>取消</button></div>
         </Modal>
       )}
@@ -1510,13 +1628,13 @@ function AICoach({ partners, interactions, todos }) {
   const saveApiKey = (k) => { setApiKey(k); sessionStorage.setItem("crm_api_key", k); };
 
   const buildSystem = () => {
-    const ps=partners.filter(p=>p.role!=="上線").map(p=>`- ${p.name}（${p.role}）：${p.notes||"無"}，標籤：${(p.tags||[]).join("、")||"無"}`).join("\n");
+    const ps=partners.filter(p=>p.role!=="上線").map(p=>`- ${p.name}（${p.role}）：備註 ${p.memo||p.notes||"無"}，痛點 ${p.painPoint||"無"}，關係 ${p.relation||"無"}`).join("\n");
     const ri=[...interactions].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,8).map(i=>{const p=partners.find(x=>x.id===i.partnerId);return `- [${i.date}] ${i.type}｜${i.title}（${p?.name||"無"}）：${i.status}`;}).join("\n");
     const pt=todos.filter(t=>!t.done).map(t=>`- ${t.title}`).join("\n");
     const rp=selP?partners.find(p=>p.id===selP):null;
     if(mode==="advice") return `你是電商直銷人脈經營顧問，親切實際，使用繁體中文。\n【夥伴】\n${ps}\n【近期互動】\n${ri}\n【待辦】\n${pt}\n根據資料給具體行動建議，條列清楚。`;
     if(mode==="cheer") return `你是電商直銷心理支持教練，溫暖真誠有力量，使用繁體中文。不說廢話，真實有溫度地鼓勵對方，必要時分享一句激勵的話。`;
-    if(mode==="roleplay") return `你是電商直銷對話模擬教練，使用繁體中文。\n用戶練習跟${rp?`「${rp.name}」（${rp.role}，備注：${rp.notes||"無"}）`:"潛在夥伴"}對話。\n先扮演對方說一句話，等用戶回應後給評分（0-10分）與改善建議。用【對方】和【教練點評】區分角色。`;
+    if(mode==="roleplay") return `你是電商直銷對話模擬教練，使用繁體中文。\n用戶練習跟${rp?`「${rp.name}」（${rp.role}，備註：${rp.memo||rp.notes||"無"}）`:"潛在夥伴"}對話。\n先扮演對方說一句話，等用戶回應後給評分（0-10分）與改善建議。用【對方】和【教練點評】區分角色。`;
     return "";
   };
 
