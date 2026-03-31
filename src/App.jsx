@@ -63,12 +63,12 @@ async function save(key, val) {
 }
 
 // ─── Constants ────────────────────────────────────────────────────
-const RECRUIT_ROLES = ["未加入", "暖身中", "確定談場", "跟進中", "拒絕", "已加入"];
+const RECRUIT_ROLES = ["未加入", "暖身中", "確定談場", "談場延期", "跟進中", "拒絕", "已加入"];
 // 非上線狀態只保留招募漏斗角色（把「夥伴」視為已加入移除重疊）
 const NON_UPLINE_ROLES = [...RECRUIT_ROLES];
 const COST_TYPES = ["訂金", "買貨", "加盟"];
 const TYPE_COLOR = { 訂金: "#4a90d9", 買貨: "#b8860b", 加盟: "#c0392b" };
-const RECRUIT_COLOR = { 未加入: "#aaa", 暖身中: "#4a90d9", 確定談場: "#b8860b", 跟進中: "#8b5cf6", 拒絕: "#c0392b", 已加入: "#27ae60" };
+const RECRUIT_COLOR = { 未加入: "#aaa", 暖身中: "#4a90d9", 確定談場: "#b8860b", 談場延期: "#e67e22", 跟進中: "#8b5cf6", 拒絕: "#c0392b", 已加入: "#27ae60" };
 
 const ABC_TEMPLATE = `C角：
 B角：
@@ -732,8 +732,8 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
     persistIncomes(next);
   };
 
-  const recruitStats = ["未加入","暖身中","確定談場","跟進中","拒絕","已加入"].map(r=>({ role:r, count:partners.filter(p=>p.role===r).length }));
-  const rcol = { 未加入:"#aaa", 暖身中:"#2563eb", 確定談場:"#b8860b", 跟進中:"#7c3aed", 拒絕:"#c0392b", 已加入:"#27ae60" };
+  const recruitStats = ["未加入","暖身中","確定談場","談場延期","跟進中","拒絕","已加入"].map(r=>({ role:r, count:partners.filter(p=>p.role===r).length }));
+  const rcol = { 未加入:"#aaa", 暖身中:"#2563eb", 確定談場:"#b8860b", 談場延期:"#e67e22", 跟進中:"#7c3aed", 拒絕:"#c0392b", 已加入:"#27ae60" };
 
   const totalIncome = incomes.reduce((s,i)=>s+i.amount,0);
   const totalCost = selfCosts.reduce((s,c)=>s+(+c.amount||0),0);
