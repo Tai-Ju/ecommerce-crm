@@ -408,7 +408,7 @@ export default function App() {
           </nav>
         </header>
         <main className="main">
-          {tab==="dashboard" && <Dashboard partners={partners} interactions={interactions} setInteractions={i=>persist(KEYS.interactions,i,setInteractions)} todos={todos} goals={goals} setGoals={g=>persist(KEYS.goals,g,setGoals)} setTodos={t=>persist(KEYS.todos,t,setTodos)} manifest={manifest} setManifest={m=>persist(KEYS.manifest,m,setManifest)} incomes={incomes} persistIncomes={v=>persist(KEYS.incomes,v,setIncomes)}/>}
+          {tab==="dashboard" && <Dashboard partners={partners} persistPartners={p=>persist(KEYS.partners,p,setPartners)} interactions={interactions} setInteractions={i=>persist(KEYS.interactions,i,setInteractions)} todos={todos} goals={goals} setGoals={g=>persist(KEYS.goals,g,setGoals)} setTodos={t=>persist(KEYS.todos,t,setTodos)} manifest={manifest} setManifest={m=>persist(KEYS.manifest,m,setManifest)} incomes={incomes} persistIncomes={v=>persist(KEYS.incomes,v,setIncomes)}/>}
           {tab==="partners"  && <Partners
             partners={partners}
             setPartners={p=>persist(KEYS.partners,p,setPartners)}
@@ -427,14 +427,18 @@ export default function App() {
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────
-function Dashboard({ partners, interactions, setInteractions, goals, setGoals, manifest, setManifest, incomes, persistIncomes }) {
+function Dashboard({ partners, persistPartners, interactions, setInteractions, goals, setGoals, manifest, setManifest, incomes, persistIncomes }) {
   const [editGoals, setEditGoals] = useState(false);
   const [editManifest, setEditManifest] = useState(false);
   const [gd, setGd] = useState(goals);
   const [md, setMd] = useState(manifest);
   const [newCond, setNewCond] = useState("");
-  const [showAddIncome, setShowAddIncome] = useState(false);
+  const [showIncomeForm, setShowIncomeForm] = useState(false);
+  const [editingIncomeId, setEditingIncomeId] = useState("");
   const [incomeDraft, setIncomeDraft] = useState({ date: new Date().toISOString().slice(0,10), amount: "", note: "" });
+  const [showCostForm, setShowCostForm] = useState(false);
+  const [editingCost, setEditingCost] = useState(null); // { partnerId, costId }
+  const [costDraft, setCostDraft] = useState({ partnerId: "", date: new Date().toISOString().slice(0,10), type: "買貨", amount: "", note: "" });
 
   const saveIncomes = (next) => {
     persistIncomes(next);
@@ -451,11 +455,75 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
   const pendingInteractions = interactions.filter(i=>i.status==="待執行").sort((a,b)=>a.date.localeCompare(b.date));
   const toggleInteraction = (id) => setInteractions(interactions.map(i=>i.id===id?{...i,status:"已完成"}:i));
 
-  const addIncome = () => {
-    if (!incomeDraft.amount) return;
-    saveIncomes([...incomes, { id: uid(), ...incomeDraft, amount: +incomeDraft.amount }]);
+  const openIncomeNew = () => {
+    setEditingIncomeId("");
     setIncomeDraft({ date: new Date().toISOString().slice(0,10), amount: "", note: "" });
-    setShowAddIncome(false);
+    setShowIncomeForm(true);
+  };
+  const openIncomeEdit = (income) => {
+    setEditingIncomeId(income.id);
+    setIncomeDraft({ date: income.date || new Date().toISOString().slice(0,10), amount: String(income.amount ?? ""), note: income.note || "" });
+    setShowIncomeForm(true);
+  };
+  const saveIncome = () => {
+    if (!incomeDraft.amount) return;
+    const payload = { id: editingIncomeId || uid(), ...incomeDraft, amount: +incomeDraft.amount };
+    const next = editingIncomeId ? incomes.map(i => i.id===editingIncomeId ? payload : i) : [...incomes, payload];
+    saveIncomes(next);
+    setIncomeDraft({ date: new Date().toISOString().slice(0,10), amount: "", note: "" });
+    setEditingIncomeId("");
+    setShowIncomeForm(false);
+  };
+
+  const nonUplinePartners = partners.filter(p=>p.role!=="上線");
+  const allCosts = partners.flatMap(p=>(p.costs||[]).map(c=>({ ...c, partnerId:p.id, partnerName:p.name }))).sort((a,b)=>b.date.localeCompare(a.date));
+
+  const openCostNew = () => {
+    setEditingCost(null);
+    setCostDraft({
+      partnerId: nonUplinePartners[0]?.id || "",
+      date: new Date().toISOString().slice(0,10),
+      type: "買貨",
+      amount: "",
+      note: "",
+    });
+    setShowCostForm(true);
+  };
+  const openCostEdit = (cost) => {
+    setEditingCost({ partnerId: cost.partnerId, costId: cost.id });
+    setCostDraft({
+      partnerId: cost.partnerId || "",
+      date: cost.date || new Date().toISOString().slice(0,10),
+      type: cost.type || "買貨",
+      amount: String(cost.amount ?? ""),
+      note: cost.note || "",
+    });
+    setShowCostForm(true);
+  };
+  const saveCost = () => {
+    if (!costDraft.partnerId || !costDraft.amount) return;
+    const costId = editingCost?.costId || uid();
+    const nextPartners = partners.map(p => {
+      let costs = [...(p.costs || [])];
+      if (editingCost && p.id === editingCost.partnerId) costs = costs.filter(c => c.id !== editingCost.costId);
+      if (p.id === costDraft.partnerId) {
+        costs.push({
+          id: costId,
+          date: costDraft.date,
+          type: costDraft.type,
+          amount: +costDraft.amount,
+          note: costDraft.note,
+        });
+      }
+      return { ...p, costs };
+    });
+    persistPartners(nextPartners);
+    setShowCostForm(false);
+    setEditingCost(null);
+  };
+  const deleteCost = (cost) => {
+    const nextPartners = partners.map(p => p.id===cost.partnerId ? { ...p, costs:(p.costs||[]).filter(c=>c.id!==cost.id) } : p);
+    persistPartners(nextPartners);
   };
 
   return (
@@ -489,7 +557,7 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
                 <div style={{fontSize:11,color:"var(--text2)",marginTop:3}}>目標 NT${(goals.monthlyIncome||0).toLocaleString()}</div>
                 <div className="progress-bar"><div className="progress-fill" style={{width:`${pct(totalIncome,goals.monthlyIncome||1)}%`}}/></div>
               </div>
-              <button className="btn btn-ghost btn-sm" style={{flexShrink:0}} onClick={()=>setShowAddIncome(true)}>＋</button>
+              <button className="btn btn-ghost btn-sm" style={{flexShrink:0}} onClick={openIncomeNew}>＋</button>
             </div>
             {incomes.length===0&&<div style={{fontSize:11,color:"var(--text3)"}}>尚無收入紀錄</div>}
             {[...incomes].sort((a,b)=>b.date.localeCompare(a.date)).map(i=>(
@@ -497,6 +565,7 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
                 <div><div className="text-sm">{i.note||"收入"}</div><div className="text-xs mono" style={{color:var_gold,opacity:.7}}>{i.date}</div></div>
                 <div className="flex items-center gap-8">
                   <span className="mono" style={{color:"var(--green)",fontSize:12}}>+NT${i.amount.toLocaleString()}</span>
+                  <button style={{background:"none",border:"none",color:"var(--gold)",cursor:"pointer",fontSize:11}} onClick={()=>openIncomeEdit(i)}>✏</button>
                   <button style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:11}} onClick={()=>saveIncomes(incomes.filter(x=>x.id!==i.id))}>✕</button>
                 </div>
               </div>
@@ -505,21 +574,27 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
 
           {/* 支出欄 */}
           <div style={{background:"#fff5f5",border:"1.5px solid #fca5a5",borderRadius:10,padding:"14px 16px"}}>
-            <div className="stat-label" style={{marginBottom:4}}>💸 已投入成本</div>
+            <div className="flex justify-between items-center" style={{marginBottom:4}}>
+              <div className="stat-label">💸 已投入成本</div>
+              <button className="btn btn-ghost btn-sm" style={{padding:"2px 8px"}} onClick={openCostNew}>＋</button>
+            </div>
             <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"var(--red)",marginBottom:10}}>NT${totalCost.toLocaleString()}</div>
             {(() => {
-              const allCosts = partners.flatMap(p=>(p.costs||[]).map(c=>({...c}))).sort((a,b)=>b.date.localeCompare(a.date));
               if(allCosts.length===0) return <div style={{fontSize:11,color:"var(--text3)"}}>尚無支出紀錄</div>;
               return allCosts.map(c=>(
                 <div key={c.id} className="flex justify-between items-center" style={{padding:"5px 0",borderTop:"1px solid #fecdd3"}}>
                   <div className="flex items-center gap-5">
                     <span style={{fontSize:9,padding:"1px 4px",borderRadius:3,border:`1px solid ${TYPE_COLOR[c.type]||"#ccc"}`,color:TYPE_COLOR[c.type]||"#888",fontFamily:"'DM Mono',monospace"}}>{c.type}</span>
                     <div>
-                      <div style={{fontSize:11,color:"var(--text2)"}}>{c.note||"支出"}</div>
+                      <div style={{fontSize:11,color:"var(--text2)"}}>{c.note||"支出"} <span className="mono" style={{fontSize:10,color:"var(--text3)"}}>· {c.partnerName}</span></div>
                       <div style={{fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{c.date}</div>
                     </div>
                   </div>
-                  <span className="mono" style={{fontSize:12,color:"var(--red)"}}>NT${c.amount.toLocaleString()}</span>
+                  <div className="flex items-center gap-8">
+                    <span className="mono" style={{fontSize:12,color:"var(--red)"}}>NT${c.amount.toLocaleString()}</span>
+                    <button style={{background:"none",border:"none",color:"var(--gold)",cursor:"pointer",fontSize:11}} onClick={()=>openCostEdit(c)}>✏</button>
+                    <button style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:11}} onClick={()=>deleteCost(c)}>✕</button>
+                  </div>
                 </div>
               ));
             })()}
@@ -631,14 +706,28 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
           <div className="flex gap-8 mt-14"><button className="btn btn-gold" onClick={()=>{setManifest(md);setEditManifest(false);}}>儲存</button><button className="btn btn-ghost" onClick={()=>setEditManifest(false)}>取消</button></div>
         </Modal>
       )}
-      {showAddIncome&&(
-        <Modal title="新增收入紀錄" onClose={()=>setShowAddIncome(false)}>
+      {showIncomeForm&&(
+        <Modal title={editingIncomeId?"編輯收入紀錄":"新增收入紀錄"} onClose={()=>setShowIncomeForm(false)}>
           <div className="form-row">
             <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={incomeDraft.date} onChange={e=>setIncomeDraft({...incomeDraft,date:e.target.value})}/></div>
             <div className="form-group"><label className="label">金額 (NT$)</label><input type="number" className="input" value={incomeDraft.amount} onChange={e=>setIncomeDraft({...incomeDraft,amount:e.target.value})}/></div>
           </div>
           <div className="form-group"><label className="label">備注</label><input className="input" value={incomeDraft.note} onChange={e=>setIncomeDraft({...incomeDraft,note:e.target.value})} placeholder="三月獎金、業績分潤…"/></div>
-          <div className="flex gap-8 mt-12"><button className="btn btn-gold" onClick={addIncome}>新增</button><button className="btn btn-ghost" onClick={()=>setShowAddIncome(false)}>取消</button></div>
+          <div className="flex gap-8 mt-12"><button className="btn btn-gold" onClick={saveIncome}>{editingIncomeId?"儲存":"新增"}</button><button className="btn btn-ghost" onClick={()=>setShowIncomeForm(false)}>取消</button></div>
+        </Modal>
+      )}
+      {showCostForm&&(
+        <Modal title={editingCost?"編輯支出紀錄":"新增支出紀錄"} onClose={()=>setShowCostForm(false)}>
+          <div className="form-row">
+            <div className="form-group"><label className="label">夥伴</label><select className="input" value={costDraft.partnerId} onChange={e=>setCostDraft({...costDraft,partnerId:e.target.value})}>{nonUplinePartners.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+            <div className="form-group"><label className="label">種類</label><select className="input" value={costDraft.type} onChange={e=>setCostDraft({...costDraft,type:e.target.value})}>{COST_TYPES.map(t=><option key={t}>{t}</option>)}</select></div>
+          </div>
+          <div className="form-row">
+            <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={costDraft.date} onChange={e=>setCostDraft({...costDraft,date:e.target.value})}/></div>
+            <div className="form-group"><label className="label">金額 (NT$)</label><input type="number" className="input" value={costDraft.amount} onChange={e=>setCostDraft({...costDraft,amount:e.target.value})}/></div>
+          </div>
+          <div className="form-group"><label className="label">備注</label><input className="input" value={costDraft.note} onChange={e=>setCostDraft({...costDraft,note:e.target.value})} placeholder="訂金、買貨、加盟…"/></div>
+          <div className="flex gap-8 mt-12"><button className="btn btn-gold" onClick={saveCost}>{editingCost?"儲存":"新增"}</button><button className="btn btn-ghost" onClick={()=>setShowCostForm(false)}>取消</button></div>
         </Modal>
       )}
     </div>
