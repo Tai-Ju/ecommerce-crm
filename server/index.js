@@ -14,6 +14,7 @@ const ALLOWED = new Set([
   "crm3:playbook",
   "crm3:manifest",
   "crm3:incomes",
+  "crm3:selfCosts",
 ]);
 
 function safeEqualToken(a, b) {

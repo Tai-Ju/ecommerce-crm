@@ -737,19 +737,11 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
   const [showForm, setShowForm] = useState(false);
   const [editData, setEditData] = useState(null);
   const [filter, setFilter] = useState("全部");
-  const [sortBy, setSortBy] = useState("name-asc");
+  const [sortBy, setSortBy] = useState("default");
   const [fieldFilters, setFieldFilters] = useState({
-    name: "全部",
-    attribute: "全部",
-    painPoint: "全部",
-    region: "全部",
-    vacation: "全部",
-    memo: "全部",
     gender: "全部",
-    relation: "全部",
-    age: "全部",
-    occupation: "全部",
-    salary: "全部",
+    region: "全部",
+    attribute: "全部",
   });
   const [copied, setCopied] = useState(false);
 
@@ -763,17 +755,9 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
   const nonUplines = partners.filter(p=>p.role!=="上線");
   const filterGroups = ["全部",...RECRUIT_ROLES];
   const filterableFields = [
-    { key: "name", label: "姓名" },
     { key: "gender", label: "性別" },
-    { key: "relation", label: "關係" },
-    { key: "age", label: "年齡" },
-    { key: "occupation", label: "職業" },
-    { key: "salary", label: "薪資" },
-    { key: "attribute", label: "屬性" },
-    { key: "painPoint", label: "痛點需求" },
     { key: "region", label: "地區" },
-    { key: "vacation", label: "休假" },
-    { key: "memo", label: "備註" },
+    { key: "attribute", label: "屬性" },
   ];
   const getFieldValue = (p, key) => String(p?.[key] ?? "").trim() || "—";
   const fieldOptions = filterableFields.reduce((acc, f) => {
@@ -788,15 +772,10 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       return fv === "全部" ? true : getFieldValue(p, f.key) === fv;
     }))
     .sort((a, b) => {
-      const n = (v) => Number(v || 0);
-      if (sortBy === "name-asc") return String(a.name||"").localeCompare(String(b.name||""), "zh-Hant");
-      if (sortBy === "name-desc") return String(b.name||"").localeCompare(String(a.name||""), "zh-Hant");
-      if (sortBy === "age-asc") return n(a.age) - n(b.age);
-      if (sortBy === "age-desc") return n(b.age) - n(a.age);
-      if (sortBy === "salary-asc") return n(a.salary) - n(b.salary);
-      if (sortBy === "salary-desc") return n(b.salary) - n(a.salary);
-      if (sortBy === "joined-desc") return String(b.joined||"").localeCompare(String(a.joined||""));
-      if (sortBy === "joined-asc") return String(a.joined||"").localeCompare(String(b.joined||""));
+      if (sortBy === "region-asc") return String(a.region||"").localeCompare(String(b.region||""), "zh-Hant");
+      if (sortBy === "region-desc") return String(b.region||"").localeCompare(String(a.region||""), "zh-Hant");
+      if (sortBy === "attribute-asc") return String(a.attribute||"").localeCompare(String(b.attribute||""), "zh-Hant");
+      if (sortBy === "attribute-desc") return String(b.attribute||"").localeCompare(String(a.attribute||""), "zh-Hant");
       return 0;
     });
 
@@ -1007,35 +986,28 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     <div>
       <div className="flex items-center justify-between mb-16">
         <h2 className="heading" style={{margin:0}}>人脈網絡 <span className="text-muted mono" style={{fontSize:12}}>({nonUplines.length})</span></h2>
-        <button className="btn btn-gold btn-sm" onClick={openNew}>＋ 新增</button>
+        <div className="flex items-center gap-8">
+          <select className="input" style={{minWidth:140}} value={fieldFilters.gender} onChange={e=>setFieldFilters({...fieldFilters,gender:e.target.value})}>
+            {(fieldOptions.gender || ["全部"]).map(v=><option key={v} value={v}>性別：{v}</option>)}
+          </select>
+          <select className="input" style={{minWidth:140}} value={fieldFilters.region} onChange={e=>setFieldFilters({...fieldFilters,region:e.target.value})}>
+            {(fieldOptions.region || ["全部"]).map(v=><option key={v} value={v}>地區：{v}</option>)}
+          </select>
+          <select className="input" style={{minWidth:140}} value={fieldFilters.attribute} onChange={e=>setFieldFilters({...fieldFilters,attribute:e.target.value})}>
+            {(fieldOptions.attribute || ["全部"]).map(v=><option key={v} value={v}>屬性：{v}</option>)}
+          </select>
+          <select className="input" style={{minWidth:150}} value={sortBy} onChange={e=>setSortBy(e.target.value)}>
+            <option value="default">排序：預設</option>
+            <option value="region-asc">排序：地區 A→Z</option>
+            <option value="region-desc">排序：地區 Z→A</option>
+            <option value="attribute-asc">排序：屬性 A→Z</option>
+            <option value="attribute-desc">排序：屬性 Z→A</option>
+          </select>
+          <button className="btn btn-gold btn-sm" onClick={openNew}>＋ 新增</button>
+        </div>
       </div>
       <div className="flex gap-8 mb-14" style={{flexWrap:"wrap"}}>
         {filterGroups.map(r=><button key={r} className={`btn btn-sm ${filter===r?"btn-gold":"btn-ghost"}`} onClick={()=>setFilter(r)}>{r}</button>)}
-      </div>
-      <div className="grid-3 mb-14">
-        <div>
-          <div className="label">排序</div>
-          <select className="input" value={sortBy} onChange={e=>setSortBy(e.target.value)}>
-            <option value="name-asc">姓名 A→Z</option>
-            <option value="name-desc">姓名 Z→A</option>
-            <option value="age-asc">年齡 小→大</option>
-            <option value="age-desc">年齡 大→小</option>
-            <option value="salary-desc">薪資 高→低</option>
-            <option value="salary-asc">薪資 低→高</option>
-            <option value="joined-desc">加入 新→舊</option>
-            <option value="joined-asc">加入 舊→新</option>
-          </select>
-        </div>
-      </div>
-      <div className="grid-3 mb-16">
-        {filterableFields.map(f=>(
-          <div key={f.key}>
-            <div className="label">{f.label} 篩選</div>
-            <select className="input" value={fieldFilters[f.key]} onChange={e=>setFieldFilters({...fieldFilters,[f.key]:e.target.value})}>
-              {(fieldOptions[f.key] || ["全部"]).map(v=><option key={v} value={v}>{v}</option>)}
-            </select>
-          </div>
-        ))}
       </div>
       <div className="grid-3">
         {filtered.map(p=>(
