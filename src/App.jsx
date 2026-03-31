@@ -1900,6 +1900,8 @@ function Playbook({ playbook, setPlaybook }) {
   const situationRef = useRef(null);
   const responseRef = useRef(null);
   const [activeField, setActiveField] = useState("response"); // situation | response
+  const autosaveTimerRef = useRef(null);
+  const [lastAutosaveAt, setLastAutosaveAt] = useState(null);
   const cats = ["全部",...Array.from(new Set(playbook.map(p=>p.category).filter(Boolean)))];
   const fl = catFilter==="全部"?playbook:playbook.filter(p=>p.category===catFilter);
   const displayed = [...fl.filter(p=>p.star),...fl.filter(p=>!p.star)];
@@ -1909,6 +1911,41 @@ function Playbook({ playbook, setPlaybook }) {
     const next=playbook.find(p=>p.id===entry.id)?playbook.map(p=>p.id===entry.id?entry:p):[...playbook,entry];
     setPlaybook(next); setShowForm(false);
   };
+
+  const shouldAutosave = (d) => {
+    const hasAny =
+      String(d.category || "").trim() ||
+      String(d.situation || "").trim() ||
+      String(d.response || "").trim() ||
+      String(d.tags || "").trim() ||
+      !!d.star;
+    return !!hasAny;
+  };
+
+  // 自動儲存：在新增/編輯視窗打字時，延遲寫回 playbook（避免誤點背景關閉而丟資料）
+  useEffect(() => {
+    if (!showForm) return;
+    if (!draft?.id) return;
+
+    // 新增情境：如果完全沒輸入內容，就不要產生空白項目
+    const exists = playbook.some(p => p.id === draft.id);
+    if (!exists && !shouldAutosave(draft)) return;
+
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(() => {
+      const entry = {
+        ...draft,
+        tags: draft.tags ? String(draft.tags).split(/[、,，]/).map(t => t.trim()).filter(Boolean) : [],
+      };
+      const next = playbook.find(p=>p.id===entry.id) ? playbook.map(p=>p.id===entry.id?entry:p) : [...playbook, entry];
+      setPlaybook(next);
+      setLastAutosaveAt(Date.now());
+    }, 300);
+
+    return () => {
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    };
+  }, [showForm, draft, playbook, setPlaybook]);
 
   const applyWrap = (field, before, after) => {
     const ref = field === "situation" ? situationRef : responseRef;
@@ -2035,6 +2072,11 @@ function Playbook({ playbook, setPlaybook }) {
             </div>
           </div>
           <div className="flex items-center gap-8 mt-6"><input type="checkbox" id="star" checked={draft.star} onChange={e=>setDraft({...draft,star:e.target.checked})} style={{accentColor:var_gold}}/><label htmlFor="star" className="text-sm" style={{cursor:"pointer"}}>⭐ 置頂重點</label></div>
+          {lastAutosaveAt && (
+            <div className="text-xs text-muted mt-6" style={{lineHeight:1.6}}>
+              已自動儲存：<span className="mono">{new Date(lastAutosaveAt).toLocaleTimeString("zh-TW")}</span>
+            </div>
+          )}
           <div className="flex gap-8 mt-12"><button className="btn btn-gold" onClick={save}>儲存</button><button className="btn btn-ghost" onClick={()=>setShowForm(false)}>取消</button></div>
         </Modal>
       )}
