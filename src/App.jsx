@@ -245,11 +245,16 @@ const css = `
 
   /* ── Grid ── */
   .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .info-kv{display:flex;flex-direction:column;gap:0}
+  .info-row{display:grid;grid-template-columns:minmax(100px,32%) 1fr;column-gap:20px;row-gap:4px;align-items:start;padding:11px 0;border-bottom:1px solid var(--border)}
+  .info-row:last-child{border-bottom:none}
+  .info-label{color:var(--text3);font-size:12px;font-weight:500;line-height:1.5}
+  .info-value{font-size:14px;line-height:1.5;color:var(--text);word-break:break-word}
   .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
   .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
   .grid-6{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
   @media(max-width:860px){.grid-3,.grid-4,.grid-6{grid-template-columns:1fr 1fr}}
-  @media(max-width:520px){.grid-2,.grid-3,.grid-4,.grid-6{grid-template-columns:1fr}.nav-btn{padding:0 9px;font-size:11px}}
+  @media(max-width:520px){.grid-2,.grid-3,.grid-4,.grid-6{grid-template-columns:1fr}.nav-btn{padding:0 9px;font-size:11px}.info-row{grid-template-columns:1fr;gap:6px}}
 
   /* ── Typography ── */
   .heading{font-family:'Playfair Display',serif;color:var(--gold);font-size:19px;margin-bottom:14px}
@@ -384,6 +389,9 @@ export default function App() {
         age: p.age ?? "",
         occupation: p.occupation || "",
         salary: p.salary ?? "",
+        dateTalkVenue: p.dateTalkVenue || "",
+        dateTeamActivity: p.dateTeamActivity || "",
+        dateWarmupPhysical: p.dateWarmupPhysical || "",
       })));
       const rawIx = (await load(KEYS.interactions)) || SEED_INTERACTIONS;
       const migratedIx = rawIx.map(i => (i.type === "討論" ? { ...i, type: "暖身" } : i));
@@ -829,7 +837,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     }
   };
 
-  const openNew = () => { setEditData({id:uid(),name:"",role:"暖身中",avatar:"",photo:"",attribute:"",painPoint:"",region:"",vacation:"",memo:"",gender:"",relation:"",age:"",occupation:"",salary:"",costs:[],abcNote:ABC_TEMPLATE,joined:new Date().toISOString().slice(0,10)}); setShowForm(true); };
+  const openNew = () => { setEditData({id:uid(),name:"",role:"暖身中",avatar:"",photo:"",attribute:"",painPoint:"",region:"",vacation:"",memo:"",gender:"",relation:"",age:"",occupation:"",salary:"",dateTalkVenue:"",dateTeamActivity:"",dateWarmupPhysical:"",costs:[],abcNote:ABC_TEMPLATE,joined:new Date().toISOString().slice(0,10)}); setShowForm(true); };
   const openEdit = (p) => {
     const nextRole = p.role === "夥伴" ? "已加入" : p.role;
     setEditData({
@@ -844,7 +852,10 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       relation: p.relation || "",
       age: p.age ?? "",
       occupation: p.occupation || "",
-      salary: p.salary ?? "",
+      salary: p.salary == null || p.salary === "" ? "" : String(p.salary),
+      dateTalkVenue: p.dateTalkVenue || "",
+      dateTeamActivity: p.dateTeamActivity || "",
+      dateWarmupPhysical: p.dateWarmupPhysical || "",
       abcNote: p.abcNote || "",
     });
     setShowForm(true);
@@ -855,7 +866,10 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       avatar:editData.avatar||editData.name[0]||"?",
       photo:editData.photo||"",
       age: editData.age === "" ? "" : +editData.age,
-      salary: editData.salary === "" ? "" : +editData.salary,
+      salary: String(editData.salary ?? "").trim(),
+      dateTalkVenue: String(editData.dateTalkVenue ?? "").trim(),
+      dateTeamActivity: String(editData.dateTeamActivity ?? "").trim(),
+      dateWarmupPhysical: String(editData.dateWarmupPhysical ?? "").trim(),
     };
     const next=partners.find(p=>p.id===entry.id)?partners.map(p=>p.id===entry.id?entry:p):[...partners,entry];
     setPartners(next); setShowForm(false);
@@ -1027,7 +1041,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
               {p.region&&<span className="tag">{p.region}</span>}
               {p.occupation&&<span className="tag">{p.occupation}</span>}
             </div>
-            <div className="text-xs text-muted mono mb-4">年齡 {p.age||"—"} · 薪資 {p.salary?`NT$${(+p.salary).toLocaleString()}`:"—"}</div>
+            <div className="text-xs text-muted mono mb-4">年齡 {p.age||"—"} · 薪資 {p.salary != null && String(p.salary).trim() !== "" ? String(p.salary) : "—"}</div>
             {(p.costs||[]).length>0&&<div className="mono mt-4" style={{fontSize:11,color:"var(--red)"}}>投入 NT${(p.costs||[]).reduce((a,c)=>a+c.amount,0).toLocaleString()}</div>}
             {p.abcNote&&p.abcNote!==ABC_TEMPLATE&&<div className="tag tag-gold" style={{marginTop:6,display:"inline-block"}}>📋 已有ABC單</div>}
             <div className="flex gap-6 mt-10" onClick={e=>e.stopPropagation()}>
@@ -1061,9 +1075,26 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
           {/* Info tab */}
           {detailTab==="info"&&(
             <div>
-              <div className="grid-2 mb-10">
-                {[["👤 屬性",selected.attribute],["⚠ 痛點需求",selected.painPoint],["🧭 地區",selected.region],["🛌 休假",selected.vacation],["⚧ 性別",selected.gender],["🤝 關係",selected.relation],["🎂 年齡",selected.age||"—"],["💼 職業",selected.occupation],["💰 薪資",selected.salary?`NT$${(+selected.salary).toLocaleString()}`:"—"],["📅 加入名單",selected.joined?fmt(selected.joined):"—"]].map(([l,v])=>(
-                  <div key={l}><div className="label">{l}</div><div className="text-sm">{v||"—"}</div></div>
+              <div className="info-kv mb-10">
+                {[
+                  ["屬性", selected.attribute],
+                  ["痛點需求", selected.painPoint],
+                  ["地區", selected.region],
+                  ["休假", selected.vacation],
+                  ["性別", selected.gender],
+                  ["關係", selected.relation],
+                  ["年齡", selected.age !== "" && selected.age != null ? String(selected.age) : ""],
+                  ["職業", selected.occupation],
+                  ["薪資", selected.salary != null && String(selected.salary).trim() !== "" ? String(selected.salary) : ""],
+                  ["加入名單", selected.joined ? fmt(selected.joined) : ""],
+                  ["談場", selected.dateTalkVenue ? fmt(selected.dateTalkVenue) : ""],
+                  ["團隊活動", selected.dateTeamActivity ? fmt(selected.dateTeamActivity) : ""],
+                  ["實體暖身", selected.dateWarmupPhysical ? fmt(selected.dateWarmupPhysical) : ""],
+                ].map(([l, v]) => (
+                  <div key={l} className="info-row">
+                    <div className="info-label">{l}</div>
+                    <div className="info-value">{v && String(v).trim() !== "" ? v : "—"}</div>
+                  </div>
                 ))}
               </div>
               {selected.memo&&<div className="card-sm"><div className="label">備註</div><div className="text-sm mt-6" style={{lineHeight:1.8}}>{selected.memo}</div></div>}
@@ -1189,7 +1220,12 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             <div className="form-group"><label className="label">年齡</label><input type="number" className="input" value={editData.age} onChange={e=>setEditData({...editData,age:e.target.value})}/></div>
             <div className="form-group"><label className="label">職業</label><input className="input" value={editData.occupation} onChange={e=>setEditData({...editData,occupation:e.target.value})}/></div>
           </div>
-          <div className="form-group"><label className="label">薪資</label><input type="number" className="input" value={editData.salary} onChange={e=>setEditData({...editData,salary:e.target.value})}/></div>
+          <div className="form-group"><label className="label">薪資</label><input type="text" className="input" value={editData.salary} onChange={e=>setEditData({...editData,salary:e.target.value})} placeholder="例：NT$45,000、5萬/月、面議"/></div>
+          <div className="form-row">
+            <div className="form-group"><label className="label">談場（日期）</label><input type="date" className="input" value={editData.dateTalkVenue || ""} onChange={e=>setEditData({...editData,dateTalkVenue:e.target.value})}/></div>
+            <div className="form-group"><label className="label">團隊活動</label><input type="date" className="input" value={editData.dateTeamActivity || ""} onChange={e=>setEditData({...editData,dateTeamActivity:e.target.value})}/></div>
+          </div>
+          <div className="form-group"><label className="label">實體暖身</label><input type="date" className="input" value={editData.dateWarmupPhysical || ""} onChange={e=>setEditData({...editData,dateWarmupPhysical:e.target.value})}/></div>
           <div className="form-group">
             <label className="label">上傳照片（可選）</label>
             {editData.photo && (
