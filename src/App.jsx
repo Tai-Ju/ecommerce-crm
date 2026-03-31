@@ -1183,9 +1183,9 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-16">
+      <div className="flex items-center justify-between mb-16" style={{ flexWrap: "wrap", gap: 12 }}>
         <h2 className="heading" style={{margin:0}}>人脈網絡 <span className="text-muted mono" style={{fontSize:12}}>({nonUplines.length})</span></h2>
-        <div className="flex items-center gap-8">
+        <div className="flex items-center gap-8" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
           <select className="input" style={{minWidth:140}} value={fieldFilters.gender} onChange={e=>setFieldFilters({...fieldFilters,gender:e.target.value})}>
             {(fieldOptions.gender || ["全部"]).map(v=><option key={v} value={v}>性別：{v}</option>)}
           </select>
