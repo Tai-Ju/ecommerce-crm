@@ -579,7 +579,7 @@ const css = `
   .timeline-item:hover{background:var(--bg3)}
   .tl-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;margin-top:5px}
   .type-暖身{color:var(--blue)}.type-追蹤{color:var(--gold)}.type-規劃{color:var(--green)}.type-上線會議{color:var(--purple)}
-  .tl-dot.type-暖身{background:var(--blue)}.tl-dot.type-追蹤{background:var(--gold)}.tl-dot.type-規劃{background:var(--green)}.tl-dot.type-上線會議{background:var(--purple)}.tl-dot.type-談場{background:#c2410c}.tl-dot.type-團隊活動{background:#047857}.tl-dot.type-實體暖身{background:#4338ca}
+  .tl-dot.type-暖身{background:var(--blue)}.tl-dot.type-追蹤{background:var(--gold)}.tl-dot.type-規劃{background:var(--green)}.tl-dot.type-上線會議{background:var(--purple)}.tl-dot.type-談場{background:#c2410c}.tl-dot.type-團隊活動{background:#047857}.tl-dot.type-實體暖身{background:#4338ca}.tl-dot.type-產品課程{background:#6d28d9}
   .status-badge{font-size:10px;padding:2px 6px;border-radius:4px;font-family:'DM Mono',monospace}
   .status-已完成{background:#d1fae5;color:#065f46}.status-待執行{background:var(--gold-light);color:var(--gold)}
 
@@ -615,6 +615,7 @@ const css = `
   .cal-event.type-談場{background:#fff7ed;color:#c2410c}
   .cal-event.type-團隊活動{background:#ecfdf5;color:#047857}
   .cal-event.type-實體暖身{background:#eef2ff;color:#4338ca}
+  .cal-event.type-產品課程{background:#faf5ff;color:#6d28d9}
 
   /* ── Partner detail tabs ── */
   .detail-tab{background:none;border:none;cursor:pointer;padding:8px 14px;font-family:'Noto Serif TC',serif;font-size:13px;color:var(--text2);border-bottom:2px solid transparent;transition:all .18s}
@@ -671,6 +672,7 @@ export default function App() {
         dateTalkVenue: p.dateTalkVenue || "",
         dateTeamActivity: p.dateTeamActivity || "",
         dateWarmupPhysical: p.dateWarmupPhysical || "",
+        dateProductCourse: p.dateProductCourse || "",
       }));
       setPartners(migratedPartners);
       if (loadedPartners.some(p => p.role === "夥伴" || p.role === "拒絕")) save(KEYS.partners, migratedPartners);
@@ -725,7 +727,7 @@ export default function App() {
             setInteractions={i=>persist(KEYS.interactions,i,setInteractions)}
             rawSave={p=>save(KEYS.partners,p)}
           />}
-          {tab==="timeline"  && <Timeline  interactions={interactions} setInteractions={i=>persist(KEYS.interactions,i,setInteractions)} partners={partners}/>}
+          {tab==="timeline"  && <Timeline  interactions={interactions} setInteractions={i=>persist(KEYS.interactions,i,setInteractions)} partners={partners} setPartners={p=>persist(KEYS.partners,p,setPartners)}/>}
           {tab==="playbook"  && <Playbook  playbook={playbook} setPlaybook={pb=>persist(KEYS.playbook,pb,setPlaybook)}/>}
           {tab==="coach"     && <AICoach   partners={partners} interactions={interactions} todos={todos}/>}
           {tab==="quotes"    && <QuotesTab quotes={quotes} setQuotes={q=>persist(KEYS.quotes,q,setQuotes)}/>}
@@ -1155,7 +1157,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     }
   };
 
-  const openNew = () => { setEditData({id:uid(),name:"",role:"暖身中",avatar:"",photo:"",attribute:"",painPoint:"",region:"",vacation:"",memo:"",gender:"",relation:"",age:"",occupation:"",salary:"",dateTalkVenue:"",dateTeamActivity:"",dateWarmupPhysical:"",costs:[],abcNote:ABC_TEMPLATE,joined:new Date().toISOString().slice(0,10)}); setShowForm(true); };
+  const openNew = () => { setEditData({id:uid(),name:"",role:"暖身中",avatar:"",photo:"",attribute:"",painPoint:"",region:"",vacation:"",memo:"",gender:"",relation:"",age:"",occupation:"",salary:"",dateTalkVenue:"",dateTeamActivity:"",dateWarmupPhysical:"",dateProductCourse:"",costs:[],abcNote:ABC_TEMPLATE,joined:new Date().toISOString().slice(0,10)}); setShowForm(true); };
   const openEdit = (p) => {
     const nextRole = p.role === "夥伴" ? "已加入" : p.role;
     setEditData({
@@ -1174,6 +1176,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       dateTalkVenue: p.dateTalkVenue || "",
       dateTeamActivity: p.dateTeamActivity || "",
       dateWarmupPhysical: p.dateWarmupPhysical || "",
+      dateProductCourse: p.dateProductCourse || "",
       abcNote: p.abcNote || "",
     });
     setShowForm(true);
@@ -1188,6 +1191,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       dateTalkVenue: String(editData.dateTalkVenue ?? "").trim(),
       dateTeamActivity: String(editData.dateTeamActivity ?? "").trim(),
       dateWarmupPhysical: String(editData.dateWarmupPhysical ?? "").trim(),
+      dateProductCourse: String(editData.dateProductCourse ?? "").trim(),
     };
     const next=partners.find(p=>p.id===entry.id)?partners.map(p=>p.id===entry.id?entry:p):[...partners,entry];
     setPartners(next); setShowForm(false);
@@ -1438,6 +1442,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
                   ["談場", selected.dateTalkVenue ? fmtFullDate(selected.dateTalkVenue) : ""],
                   ["團隊活動", selected.dateTeamActivity ? fmtFullDate(selected.dateTeamActivity) : ""],
                   ["實體暖身", selected.dateWarmupPhysical ? fmtFullDate(selected.dateWarmupPhysical) : ""],
+                  ["產品課程", selected.dateProductCourse ? fmtFullDate(selected.dateProductCourse) : ""],
                 ].map(([l, v]) => (
                   <div key={l} className="info-row">
                     <div className="info-label">{l}</div>
@@ -1514,7 +1519,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             <div className="form-group"><label className="label">時間（時:分:秒）</label><input type="time" step="1" className="input" value={normalizeTime(interactionDraft.time)} onChange={e=>setInteractionDraft({...interactionDraft,time:e.target.value})}/></div>
             <div className="form-group"><label className="label">類型</label>
               <select className="input" value={interactionDraft.type} onChange={e=>setInteractionDraft({...interactionDraft,type:e.target.value})}>
-                {["暖身","追蹤","規劃","上線會議"].map(t=><option key={t}>{t}</option>)}
+                {["暖身","追蹤","規劃","上線會議","談場","團隊活動","實體暖身","產品課程"].map(t=><option key={t}>{t}</option>)}
               </select>
             </div>
           </div>
@@ -1623,7 +1628,10 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             <div className="form-group"><label className="label">談場（日期）</label><input type="date" className="input" value={editData.dateTalkVenue || ""} onChange={e=>setEditData({...editData,dateTalkVenue:e.target.value})}/></div>
             <div className="form-group"><label className="label">團隊活動</label><input type="date" className="input" value={editData.dateTeamActivity || ""} onChange={e=>setEditData({...editData,dateTeamActivity:e.target.value})}/></div>
           </div>
-          <div className="form-group"><label className="label">實體暖身</label><input type="date" className="input" value={editData.dateWarmupPhysical || ""} onChange={e=>setEditData({...editData,dateWarmupPhysical:e.target.value})}/></div>
+          <div className="form-row">
+            <div className="form-group"><label className="label">實體暖身</label><input type="date" className="input" value={editData.dateWarmupPhysical || ""} onChange={e=>setEditData({...editData,dateWarmupPhysical:e.target.value})}/></div>
+            <div className="form-group"><label className="label">產品課程</label><input type="date" className="input" value={editData.dateProductCourse || ""} onChange={e=>setEditData({...editData,dateProductCourse:e.target.value})}/></div>
+          </div>
           <div className="form-group">
             <label className="label">上傳照片（可選）</label>
             {editData.photo && (
@@ -1695,12 +1703,13 @@ function CostSection({ partner, onUpdate }) {
 }
 
 // ─── Timeline ─────────────────────────────────────────────────────
-function Timeline({ interactions, setInteractions, partners }) {
+function Timeline({ interactions, setInteractions, partners, setPartners }) {
   const [view, setView] = useState("list");
   const [filter, setFilter] = useState("全部");
   const [showForm, setShowForm] = useState(false);
   const [editData, setEditData] = useState(null);
   const [selected, setSelected] = useState(null);
+  const [scheduleDraft, setScheduleDraft] = useState(null); // { partnerId, fromField, type, date }
   const [calMonth, setCalMonth] = useState(()=>{ const n=new Date(); return {y:n.getFullYear(),m:n.getMonth()}; });
 
   const sorted = [...interactions].sort((a, b) => {
@@ -1708,13 +1717,13 @@ function Timeline({ interactions, setInteractions, partners }) {
     const da = Math.abs(toMsDT(a.date, a.time) - todayMs);
     const db = Math.abs(toMsDT(b.date, b.time) - todayMs);
     if (da !== db) return da - db; // 越接近今天越上面
-    const d = a.date.localeCompare(b.date); // 同距離：日期較早
-    if (d !== 0) return d;
-    return normalizeTime(a.time).localeCompare(normalizeTime(b.time)); // 同日：較早時間在前
+    return toMsDT(b.date, b.time) - toMsDT(a.date, a.time); // 同距離：較新的在前
   });
   const filtered = filter==="全部"?sorted:filter==="待執行"?sorted.filter(i=>i.status==="待執行"):sorted.filter(i=>i.type===filter);
   const getP = (id) => partners.find(p=>p.id===id);
   const isYmd = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
+  const scheduleFieldForType = (t) => ({ 談場: "dateTalkVenue", 團隊活動: "dateTeamActivity", 實體暖身: "dateWarmupPhysical", 產品課程: "dateProductCourse" }[t] || "");
+  const scheduleTypes = ["談場","團隊活動","實體暖身","產品課程"];
   const partnerScheduleItems = partners
     .filter(p => p.role !== "上線")
     .flatMap((p) => ([
@@ -1727,6 +1736,7 @@ function Timeline({ interactions, setInteractions, partners }) {
         title: "談場",
         status: "",
         isPartnerSchedule: true,
+        sourceField: "dateTalkVenue",
       } : null,
       p.dateTeamActivity && isYmd(p.dateTeamActivity) ? {
         id: `ps-team-${p.id}`,
@@ -1737,6 +1747,7 @@ function Timeline({ interactions, setInteractions, partners }) {
         title: "團隊活動",
         status: "",
         isPartnerSchedule: true,
+        sourceField: "dateTeamActivity",
       } : null,
       p.dateWarmupPhysical && isYmd(p.dateWarmupPhysical) ? {
         id: `ps-warm-${p.id}`,
@@ -1747,6 +1758,18 @@ function Timeline({ interactions, setInteractions, partners }) {
         title: "實體暖身",
         status: "",
         isPartnerSchedule: true,
+        sourceField: "dateWarmupPhysical",
+      } : null,
+      p.dateProductCourse && isYmd(p.dateProductCourse) ? {
+        id: `ps-course-${p.id}`,
+        date: p.dateProductCourse,
+        time: "00:00:00",
+        partnerId: p.id,
+        type: "產品課程",
+        title: "產品課程",
+        status: "",
+        isPartnerSchedule: true,
+        sourceField: "dateProductCourse",
       } : null,
     ])).filter(Boolean);
   const calendarItems = [...interactions, ...partnerScheduleItems];
@@ -1781,6 +1804,32 @@ function Timeline({ interactions, setInteractions, partners }) {
     setInteractions(next); setSelected(null);
   };
   const toggle = (id) => setInteractions(interactions.map(i=>i.id===id?{...i,status:i.status==="已完成"?"待執行":"已完成"}:i));
+  const openScheduleEdit = (it) => {
+    if (!it?.isPartnerSchedule) return;
+    setScheduleDraft({ partnerId: it.partnerId, fromField: it.sourceField, type: it.type, date: it.date });
+  };
+  const saveSchedule = () => {
+    if (!scheduleDraft?.partnerId) return;
+    const toField = scheduleFieldForType(scheduleDraft.type);
+    if (!toField) return;
+    const next = partners.map(p => {
+      if (p.id !== scheduleDraft.partnerId) return p;
+      const updated = { ...p };
+      if (scheduleDraft.fromField && scheduleDraft.fromField !== toField) updated[scheduleDraft.fromField] = "";
+      updated[toField] = scheduleDraft.date || "";
+      return updated;
+    });
+    setPartners(next);
+    setScheduleDraft(null);
+    setSelected(null);
+  };
+  const deleteSchedule = () => {
+    if (!scheduleDraft?.partnerId || !scheduleDraft.fromField) return;
+    const next = partners.map(p => (p.id === scheduleDraft.partnerId ? { ...p, [scheduleDraft.fromField]: "" } : p));
+    setPartners(next);
+    setScheduleDraft(null);
+    setSelected(null);
+  };
 
   // Calendar helpers
   const calDays = () => {
@@ -1888,11 +1937,10 @@ function Timeline({ interactions, setInteractions, partners }) {
               .sort((a,b)=>a.localeCompare(b))
               .flatMap(k=>[...(iMap[k]||[])].sort((a,b)=>{
                 const todayMs = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00").getTime();
-                const toMs = (s) => new Date(s + "T00:00:00").getTime();
-                const da = Math.abs(toMs(a.date) - todayMs);
-                const db = Math.abs(toMs(b.date) - todayMs);
+                const da = Math.abs(toMsDT(a.date, a.time) - todayMs);
+                const db = Math.abs(toMsDT(b.date, b.time) - todayMs);
                 if (da !== db) return da - db;
-                return b.date.localeCompare(a.date);
+                return toMsDT(b.date, b.time) - toMsDT(a.date, a.time);
               }))
               .map(item=>{
                 const p=getP(item.partnerId);
@@ -1924,7 +1972,11 @@ function Timeline({ interactions, setInteractions, partners }) {
             <span className="tag" style={selected.type==="上線會議"?{background:"#f5f3ff",borderColor:"#c4b5fd",color:"var(--purple)"}:{}}>{selected.type}</span>
           </div>
           {selected.content&&<div className="text-sm" style={{lineHeight:1.8}}>{selected.content}</div>}
-          {selected.isPartnerSchedule&&<div className="text-sm text-muted">來源：人脈基本資料日期欄位</div>}
+          {selected.isPartnerSchedule&&(
+            <div className="text-sm text-muted" style={{lineHeight:1.7}}>
+              來源：人脈基本資料日期欄位
+            </div>
+          )}
           {selected.type==="上線會議"&&mergeMeetingPlanFields(selected.partnerPlan, selected.actionItems)&&(
             <div className="card-sm mt-10"><div className="label">具體規劃與待辦</div><div className="text-sm mt-5" style={{lineHeight:1.8,whiteSpace:"pre-wrap"}}>{mergeMeetingPlanFields(selected.partnerPlan, selected.actionItems)}</div></div>
           )}
@@ -1937,12 +1989,39 @@ function Timeline({ interactions, setInteractions, partners }) {
           {selected.type!=="上線會議"&&selected.partnerId&&<div className="mt-8 text-sm text-muted">夥伴：{getP(selected.partnerId)?.name}</div>}
           <div className="mono text-xs text-muted mt-8">{selected.date}</div>
           <div className="divider"/>
-          {!selected.isPartnerSchedule && (
+          {selected.isPartnerSchedule ? (
+            <div className="flex gap-8">
+              <button className="btn btn-gold btn-sm" onClick={()=>{ openScheduleEdit(selected); }}>編輯</button>
+              <button className="btn btn-danger btn-sm" onClick={()=>{ openScheduleEdit(selected); deleteSchedule(); }}>清除日期</button>
+            </div>
+          ) : (
             <div className="flex gap-8">
               <button className="btn btn-gold btn-sm" onClick={()=>{ setSelected(null); setEditData({...selected,tags:Array.isArray(selected.tags)?selected.tags.join("、"):selected.tags,partnerPlan:selected.type==="上線會議"?mergeMeetingPlanFields(selected.partnerPlan,selected.actionItems):(selected.partnerPlan||""),actionItems:selected.type==="上線會議"?"":(selected.actionItems||""),quote:selected.quote||""}); setShowForm(true); }}>編輯</button>
               <button className="btn btn-danger btn-sm" onClick={()=>del(selected.id)}>刪除</button>
             </div>
           )}
+        </Modal>
+      )}
+
+      {scheduleDraft && (
+        <Modal title="編輯行程（來自人脈基本資料）" onClose={()=>setScheduleDraft(null)}>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="label">類型</label>
+              <select className="input" value={scheduleDraft.type} onChange={e=>setScheduleDraft({...scheduleDraft,type:e.target.value})}>
+                {scheduleTypes.map(t=><option key={t}>{t}</option>)}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="label">日期</label>
+              <input type="date" className="input" value={scheduleDraft.date || ""} onChange={e=>setScheduleDraft({...scheduleDraft,date:e.target.value})}/>
+            </div>
+          </div>
+          <div className="flex gap-8 mt-12">
+            <button className="btn btn-gold" onClick={saveSchedule}>儲存</button>
+            <button className="btn btn-danger" onClick={deleteSchedule}>清除日期</button>
+            <button className="btn btn-ghost" onClick={()=>setScheduleDraft(null)}>取消</button>
+          </div>
         </Modal>
       )}
 
@@ -1953,7 +2032,7 @@ function Timeline({ interactions, setInteractions, partners }) {
             <div className="form-group"><label className="label">時間（時:分:秒）</label><input type="time" step="1" className="input" value={normalizeTime(editData.time)} onChange={e=>setEditData({...editData,time:e.target.value})}/></div>
             <div className="form-group"><label className="label">類型</label>
               <select className="input" value={editData.type} onChange={e=>setEditData({...editData,type:e.target.value,partnerId:e.target.value==="上線會議"?"":editData.partnerId})}>
-                {["暖身","追蹤","規劃","上線會議"].map(t=><option key={t}>{t}</option>)}
+                {["暖身","追蹤","規劃","上線會議","談場","團隊活動","實體暖身","產品課程"].map(t=><option key={t}>{t}</option>)}
               </select>
             </div>
           </div>
