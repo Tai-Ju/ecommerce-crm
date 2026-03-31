@@ -1736,14 +1736,13 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
   const [partnerSearch, setPartnerSearch] = useState("");
   const [calMonth, setCalMonth] = useState(()=>{ const n=new Date(); return {y:n.getFullYear(),m:n.getMonth()}; });
 
-  const sorted = [...interactions].sort((a, b) => {
+  const sortByNearToday = (a, b) => {
     const todayMs = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00").getTime();
     const da = Math.abs(toMsDT(a.date, a.time) - todayMs);
     const db = Math.abs(toMsDT(b.date, b.time) - todayMs);
     if (da !== db) return da - db; // 越接近今天越上面
     return toMsDT(b.date, b.time) - toMsDT(a.date, a.time); // 同距離：較新的在前
-  });
-  const filtered = filter==="全部"?sorted:filter==="待執行"?sorted.filter(i=>i.status==="待執行"):sorted.filter(i=>i.type===filter);
+  };
   const getP = (id) => partners.find(p=>p.id===id);
   const nonUplinePartners = partners.filter(p=>p.role!=="上線");
   const filteredPartnerOptions = nonUplinePartners.filter(p => p.name.includes(partnerSearch.trim()));
@@ -1803,6 +1802,8 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
     ])).filter(Boolean)
     .filter(it => !interactionScheduleSet.has(`${it.partnerId}|${it.type}|${it.date}`));
   const calendarItems = [...interactions, ...partnerScheduleItems];
+  const sorted = [...calendarItems].sort(sortByNearToday);
+  const filtered = filter==="全部"?sorted:filter==="待執行"?sorted.filter(i=>i.status==="待執行"):sorted.filter(i=>i.type===filter);
 
   const openNew = () => { setEditData({id:uid(),date:new Date().toISOString().slice(0,10),time:nowHms(),partnerId:"",type:"暖身",title:"",content:"",status:"待執行",tags:"",partnerPlan:"",actionItems:"",quote:""}); setPartnerSearch(""); setShowForm(true); };
   const saveItem = () => {
@@ -1895,7 +1896,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
       {view==="list"&&(
         <>
           <div className="flex gap-8 mb-14" style={{flexWrap:"wrap"}}>
-            {["全部","待執行","上線會議","暖身","追蹤","規劃"].map(f=><button key={f} className={`btn btn-sm ${filter===f?"btn-gold":"btn-ghost"}`} style={f==="上線會議"&&filter!==f?{borderColor:"#c4b5fd",color:"var(--purple)"}:{}} onClick={()=>setFilter(f)}>{f}</button>)}
+            {["全部","待執行","上線會議","暖身","追蹤","規劃","談場","團隊活動","實體暖身","產品課程"].map(f=><button key={f} className={`btn btn-sm ${filter===f?"btn-gold":"btn-ghost"}`} style={f==="上線會議"&&filter!==f?{borderColor:"#c4b5fd",color:"var(--purple)"}:{}} onClick={()=>setFilter(f)}>{f}</button>)}
           </div>
           <div className="card" style={{padding:0}}>
             {filtered.length===0&&<div className="empty">尚無紀錄</div>}
@@ -1907,14 +1908,15 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
                   <div style={{flex:1}}>
                     <div className="flex items-center gap-6" style={{flexWrap:"wrap"}}>
                       <span style={{fontWeight:600,fontSize:14}}>{item.title}</span>
-                      <span className={`status-badge status-${item.status}`}>{item.status}</span>
+                        {!item.isPartnerSchedule && <span className={`status-badge status-${item.status}`}>{item.status}</span>}
                       <span className="tag">{item.type}</span>
                     </div>
                     {p&&<div className="flex items-center gap-6 mt-4"><div className="avatar" style={{width:18,height:18,fontSize:9}}>{p.avatar}</div><span className="text-xs text-muted">{p.name}</span></div>}
                     {item.content&&<div className="text-sm text-muted mt-4" style={{lineHeight:1.6}}>{item.content}</div>}
+                      {item.isPartnerSchedule&&<div className="text-xs text-muted mt-4">來源：人脈基本資料日期欄位</div>}
                     <div className="text-xs mono" style={{color:"var(--text3)",marginTop:3}}>{item.date} {normalizeTime(item.time)}</div>
                   </div>
-                  <button className={`btn btn-sm ${item.status==="已完成"?"btn-gold":"btn-ghost"}`} style={{flexShrink:0,alignSelf:"flex-start"}} onClick={e=>{e.stopPropagation();toggle(item.id);}}>{item.status==="已完成"?"✓":"○"}</button>
+                    {!item.isPartnerSchedule && <button className={`btn btn-sm ${item.status==="已完成"?"btn-gold":"btn-ghost"}`} style={{flexShrink:0,alignSelf:"flex-start"}} onClick={e=>{e.stopPropagation();toggle(item.id);}}>{item.status==="已完成"?"✓":"○"}</button>}
                 </div>
               );
             })}
