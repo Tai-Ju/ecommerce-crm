@@ -1813,10 +1813,6 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
   const saveItem = () => {
     const entry = { ...editData, time: normalizeTime(editData.time), tags: editData.tags ? editData.tags.split(/[、,，]/).map(t => t.trim()).filter(Boolean) : [] };
     if (entry.type === "上線會議") entry.actionItems = "";
-    if (!entry.partnerId) {
-      alert("請先選擇關聯夥伴，才能同步到互動紀錄。");
-      return;
-    }
     let next = interactions.find(i => i.id === entry.id) ? interactions.map(i => i.id === entry.id ? entry : i) : [...interactions, entry];
     if (entry.type === "上線會議") {
       next = removeInteractionsSyncedFromMeeting(next, entry.id);
@@ -2104,7 +2100,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
             <label className="label">關聯夥伴</label>
             <input className="input" value={partnerSearch} onChange={e=>setPartnerSearch(e.target.value)} placeholder="輸入姓名關鍵字篩選"/>
             <select className="input mt-6" value={editData.partnerId} onChange={e=>setEditData({...editData,partnerId:e.target.value})}>
-              <option value="">請選擇關聯夥伴</option>
+              <option value="">（無）</option>
               {filteredPartnerOptions.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </div>
