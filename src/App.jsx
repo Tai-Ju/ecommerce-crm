@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 // ─── Storage：MongoDB 後端（設 VITE_CRM_API_URL + VITE_CRM_API_TOKEN）或本機 window.storage ──
 const KEYS = {
   partners: "crm3:partners",
+  partnersTrash: "crm3:partnersTrash",
   interactions: "crm3:interactions",
   todos: "crm3:todos",
   quotes: "crm3:quotes",
@@ -63,12 +64,12 @@ async function save(key, val) {
 }
 
 // ─── Constants ────────────────────────────────────────────────────
-const RECRUIT_ROLES = ["未加入", "暖身中", "確定談場", "談場延期", "跟進中", "邀約拒絕", "談後拒絕", "已加入"];
+const RECRUIT_ROLES = ["未加入", "暖身中", "確定談場", "談場延期", "跟進中", "已付訂金", "邀約拒絕", "談後拒絕", "已加入"];
 // 非上線狀態只保留招募漏斗角色（把「夥伴」視為已加入移除重疊）
 const NON_UPLINE_ROLES = [...RECRUIT_ROLES];
 const COST_TYPES = ["訂金", "買貨", "加盟"];
 const TYPE_COLOR = { 訂金: "#4a90d9", 買貨: "#b8860b", 加盟: "#c0392b" };
-const RECRUIT_COLOR = { 未加入: "#aaa", 暖身中: "#4a90d9", 確定談場: "#b8860b", 談場延期: "#e67e22", 跟進中: "#8b5cf6", 邀約拒絕: "#c0392b", 談後拒絕: "#e74c3c", 已加入: "#27ae60" };
+const RECRUIT_COLOR = { 未加入: "#aaa", 暖身中: "#4a90d9", 確定談場: "#b8860b", 談場延期: "#e67e22", 跟進中: "#8b5cf6", 已付訂金: "#f59e0b", 邀約拒絕: "#c0392b", 談後拒絕: "#e74c3c", 已加入: "#27ae60" };
 
 const ABC_TEMPLATE = `C角：
 B角：
@@ -758,8 +759,8 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
     persistIncomes(next);
   };
 
-  const recruitStats = ["未加入","暖身中","確定談場","談場延期","跟進中","邀約拒絕","談後拒絕","已加入"].map(r=>({ role:r, count:partners.filter(p=>p.role===r).length }));
-  const rcol = { 未加入:"#aaa", 暖身中:"#2563eb", 確定談場:"#b8860b", 談場延期:"#e67e22", 跟進中:"#7c3aed", 邀約拒絕:"#c0392b", 談後拒絕:"#e74c3c", 已加入:"#27ae60" };
+  const recruitStats = ["未加入","暖身中","確定談場","談場延期","跟進中","已付訂金","邀約拒絕","談後拒絕","已加入"].map(r=>({ role:r, count:partners.filter(p=>p.role===r).length }));
+  const rcol = { 未加入:"#aaa", 暖身中:"#2563eb", 確定談場:"#b8860b", 談場延期:"#e67e22", 跟進中:"#7c3aed", 已付訂金:"#f59e0b", 邀約拒絕:"#c0392b", 談後拒絕:"#e74c3c", 已加入:"#27ae60" };
   const partnerTotal = partners.filter(p=>p.role!=="上線").length;
   const interactionScheduleSet = new Set(
     interactions
@@ -1086,6 +1087,8 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     gender: "全部",
     region: "全部",
     attribute: "全部",
+    teamActivityFilled: "全部",
+    warmupPhysicalFilled: "全部",
   });
   const [copied, setCopied] = useState(false);
 
@@ -1098,6 +1101,8 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
 
   const csvInputRef = useRef(null);
   const [importModal, setImportModal] = useState(null); // { rows, skippedEmpty, errors, fileLabel }
+  const [trashItems, setTrashItems] = useState([]);
+  const [showTrash, setShowTrash] = useState(false);
 
   const nonUplines = partners.filter(p=>p.role!=="上線");
   const filterGroups = ["全部",...RECRUIT_ROLES];
@@ -1119,6 +1124,18 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       const fv = fieldFilters[f.key];
       return fv === "全部" ? true : getFieldValue(p, f.key) === fv;
     }))
+    .filter(p => {
+      const hasTeamActivity = String(p?.dateTeamActivity || "").trim() !== "";
+      if (fieldFilters.teamActivityFilled === "有填寫") return hasTeamActivity;
+      if (fieldFilters.teamActivityFilled === "空白") return !hasTeamActivity;
+      return true;
+    })
+    .filter(p => {
+      const hasWarmupPhysical = String(p?.dateWarmupPhysical || "").trim() !== "";
+      if (fieldFilters.warmupPhysicalFilled === "有填寫") return hasWarmupPhysical;
+      if (fieldFilters.warmupPhysicalFilled === "空白") return !hasWarmupPhysical;
+      return true;
+    })
     .sort((a, b) => {
       if (sortBy === "region-asc") return String(a.region||"").localeCompare(String(b.region||""), "zh-Hant");
       if (sortBy === "region-desc") return String(b.region||"").localeCompare(String(a.region||""), "zh-Hant");
@@ -1126,6 +1143,16 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       if (sortBy === "attribute-desc") return String(b.attribute||"").localeCompare(String(a.attribute||""), "zh-Hant");
       return 0;
     });
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const rows = (await load(KEYS.partnersTrash)) || [];
+      if (!mounted) return;
+      setTrashItems(Array.isArray(rows) ? rows : []);
+    })();
+    return () => { mounted = false; };
+  }, []);
 
   const resizeImageToAvatarDataUrl = async (file, { maxDim=256, quality=0.78 } = {}) => {
     const readAsDataUrl = (f) => new Promise((resolve, reject) => {
@@ -1216,7 +1243,37 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     const next=partners.find(p=>p.id===entry.id)?partners.map(p=>p.id===entry.id?entry:p):[...partners,entry];
     setPartners(next); setShowForm(false);
   };
-  const del = (id) => { const next=partners.filter(p=>p.id!==id); setPartners(next); setSelected(null); };
+  const del = (id) => {
+    const target = partners.find(p => p.id === id);
+    if (!target) return;
+    if (!window.confirm(`確定要刪除「${target.name}」嗎？`)) return;
+    if (!window.confirm("最後確認：刪除後會先移到回收桶，可還原。是否繼續？")) return;
+    const nextTrash = [{ ...target, deletedAt: new Date().toISOString() }, ...trashItems].slice(0, 300);
+    setTrashItems(nextTrash);
+    save(KEYS.partnersTrash, nextTrash);
+    const next=partners.filter(p=>p.id!==id);
+    setPartners(next);
+    setSelected(null);
+  };
+  const restoreFromTrash = (id) => {
+    const row = trashItems.find(x => x.id === id);
+    if (!row) return;
+    const exists = partners.some(p => p.id === row.id);
+    const restored = { ...row };
+    delete restored.deletedAt;
+    if (exists) restored.id = uid();
+    const nextPartners = [...partners, restored];
+    const nextTrash = trashItems.filter(x => x.id !== id);
+    setPartners(nextPartners);
+    setTrashItems(nextTrash);
+    save(KEYS.partnersTrash, nextTrash);
+    setShowTrash(false);
+  };
+  const removeTrashItem = (id) => {
+    const nextTrash = trashItems.filter(x => x.id !== id);
+    setTrashItems(nextTrash);
+    save(KEYS.partnersTrash, nextTrash);
+  };
   const updateCosts = (updated) => {
     const next=partners.map(p=>p.id===updated.id?updated:p);
     setPartners(next); setSelected(updated); rawSave(next);
@@ -1371,10 +1428,11 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
   return (
     <div>
       <div className="flex items-center justify-between mb-16" style={{ flexWrap: "wrap", gap: 12 }}>
-        <h2 className="heading" style={{margin:0}}>人脈網絡 <span className="text-muted mono" style={{fontSize:12}}>({nonUplines.length})</span></h2>
+        <h2 className="heading" style={{margin:0}}>人脈網絡 <span className="text-muted mono" style={{fontSize:12}}>({filtered.length})</span></h2>
         <div className="flex items-center gap-8" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
           <input ref={csvInputRef} type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={onPickPartnerCsv} />
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => csvInputRef.current?.click()}>📥 匯入 CSV</button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowTrash(true)}>🗑 回收桶 {trashItems.length > 0 ? `(${trashItems.length})` : ""}</button>
           <button className="btn btn-gold btn-sm" onClick={openNew}>＋ 新增</button>
         </div>
       </div>
@@ -1392,6 +1450,12 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
           </select>
           <select className="input input-compact" value={fieldFilters.attribute} onChange={e=>setFieldFilters({...fieldFilters,attribute:e.target.value})}>
             {(fieldOptions.attribute || ["全部"]).map(v=><option key={v} value={v}>屬性：{v}</option>)}
+          </select>
+          <select className="input input-compact" value={fieldFilters.teamActivityFilled} onChange={e=>setFieldFilters({...fieldFilters,teamActivityFilled:e.target.value})}>
+            {["全部","有填寫","空白"].map(v=><option key={v} value={v}>團隊活動：{v}</option>)}
+          </select>
+          <select className="input input-compact" value={fieldFilters.warmupPhysicalFilled} onChange={e=>setFieldFilters({...fieldFilters,warmupPhysicalFilled:e.target.value})}>
+            {["全部","有填寫","空白"].map(v=><option key={v} value={v}>實體暖身：{v}</option>)}
           </select>
           <select className="input input-compact" value={sortBy} onChange={e=>setSortBy(e.target.value)}>
             <option value="default">排序：預設</option>
@@ -1623,6 +1687,33 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
         </Modal>
       )}
 
+      {showTrash && (
+        <Modal title="人脈回收桶" onClose={() => setShowTrash(false)}>
+          {trashItems.length === 0 && <div className="empty">目前沒有可還原的夥伴</div>}
+          {trashItems.length > 0 && (
+            <div className="card" style={{ padding: 0 }}>
+              {trashItems.map((p) => (
+                <div key={p.id} className="timeline-item">
+                  <div style={{flex:1}}>
+                    <div className="flex items-center gap-6" style={{flexWrap:"wrap"}}>
+                      <span style={{fontWeight:600,fontSize:14}}>{p.name || "未命名"}</span>
+                      <span className="tag">{p.role || "未分類"}</span>
+                    </div>
+                    <div className="text-xs mono mt-4" style={{color:"var(--text3)"}}>
+                      刪除時間：{p.deletedAt ? new Date(p.deletedAt).toLocaleString("zh-TW") : "—"}
+                    </div>
+                  </div>
+                  <div className="flex gap-8">
+                    <button className="btn btn-gold btn-sm" onClick={() => restoreFromTrash(p.id)}>還原</button>
+                    <button className="btn btn-danger btn-sm" onClick={() => removeTrashItem(p.id)}>永久刪除</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Modal>
+      )}
+
       {/* Edit form */}
       {showForm&&editData&&(
         <Modal title={partners.find(p=>p.id===editData.id)?"編輯夥伴":"新增夥伴"} onClose={()=>setShowForm(false)}>
@@ -1806,8 +1897,8 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
     ])).filter(Boolean)
     .filter(it => !interactionScheduleSet.has(`${it.partnerId}|${it.type}|${it.date}`));
   const calendarItems = [...interactions, ...partnerScheduleItems];
-  const sorted = [...calendarItems].sort(sortByNearToday);
-  const filtered = filter==="全部"?sorted:filter==="待執行"?sorted.filter(i=>i.status==="待執行"):sorted.filter(i=>i.type===filter);
+  const filteredItems = filter==="全部"?calendarItems:filter==="待執行"?calendarItems.filter(i=>i.status==="待執行"):calendarItems.filter(i=>i.type===filter);
+  const sorted = [...filteredItems].sort(sortByNearToday);
 
   const openNew = () => { setEditData({id:uid(),date:new Date().toISOString().slice(0,10),time:nowHms(),partnerId:"",type:"暖身",title:"暖身",content:"",status:"待執行",tags:"",partnerPlan:"",actionItems:"",quote:""}); setPartnerSearch(""); setShowForm(true); };
   const saveItem = () => {
@@ -1883,7 +1974,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
     return cells;
   };
   const today=dk(new Date());
-  const iMap=calendarItems.reduce((acc,i)=>{ (acc[i.date]=acc[i.date]||[]).push(i); return acc; },{});
+  const iMap=filteredItems.reduce((acc,i)=>{ (acc[i.date]=acc[i.date]||[]).push(i); return acc; },{});
 
   return (
     <div>
@@ -1899,12 +1990,9 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
       {/* List view */}
       {view==="list"&&(
         <>
-          <div className="flex gap-8 mb-14" style={{flexWrap:"wrap"}}>
-            {["全部","待執行","上線會議","暖身","追蹤","規劃","談場","團隊活動","實體暖身","產品課程","新人啟動"].map(f=><button key={f} className={`btn btn-sm ${filter===f?"btn-gold":"btn-ghost"}`} style={f==="上線會議"&&filter!==f?{borderColor:"#c4b5fd",color:"var(--purple)"}:{}} onClick={()=>setFilter(f)}>{f}</button>)}
-          </div>
           <div className="card" style={{padding:0}}>
-            {filtered.length===0&&<div className="empty">尚無紀錄</div>}
-            {filtered.map(item=>{
+            {sorted.length===0&&<div className="empty">尚無紀錄</div>}
+            {sorted.map(item=>{
               const p=getP(item.partnerId);
               return (
                 <div key={item.id} className="timeline-item" onClick={()=>setSelected(item)}>
@@ -1931,6 +2019,9 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
       {/* Calendar view — shows events + mini list below */}
       {view==="cal"&&(
         <div>
+          <div className="flex gap-8 mb-14" style={{flexWrap:"wrap"}}>
+            {["全部","待執行","上線會議","暖身","追蹤","規劃","談場","團隊活動","實體暖身","產品課程","新人啟動"].map(f=><button key={f} className={`btn btn-sm ${filter===f?"btn-gold":"btn-ghost"}`} style={f==="上線會議"&&filter!==f?{borderColor:"#c4b5fd",color:"var(--purple)"}:{}} onClick={()=>setFilter(f)}>{f}</button>)}
+          </div>
           <div className="flex items-center justify-between mb-12">
             <button className="btn btn-ghost btn-sm" onClick={()=>setCalMonth(p=>{const d=new Date(p.y,p.m-1);return{y:d.getFullYear(),m:d.getMonth()};})}>‹ 上月</button>
             <span style={{fontFamily:"'Playfair Display',serif",color:var_gold,fontSize:18}}>{calMonth.y} 年 {calMonth.m+1} 月</span>
