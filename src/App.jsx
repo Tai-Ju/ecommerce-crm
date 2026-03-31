@@ -105,11 +105,11 @@ const SEED_PARTNERS = [
   { id: "p5", name: "李美玲", role: "邀約拒絕", avatar: "李", phone: "0956-789-012", ig: "@meiling_li", birthday: "1988-09-03", tags: ["家庭"], notes: "目前說不考慮，半年後再聯繫。", costs: [], abcNote: "", joined: "2025-01-15" },
 ];
 const SEED_INTERACTIONS = [
-  { id: "i1", date: "2025-03-24", partnerId: "p2", type: "暖身", title: "Q2 業績規劃", content: "討論了四月份的推廣策略。", status: "已完成", tags: ["業績"] },
-  { id: "i2", date: "2025-03-27", partnerId: "p2", type: "追蹤", title: "新人教學跟進", content: "陳威宇詢問產品數據整理方式，分享了追蹤表格模板。", status: "已完成", tags: ["教學"] },
-  { id: "i3", date: "2025-04-02", partnerId: "p3", type: "規劃", title: "邀約 IG 合作聊聊", content: "計劃傳訊問她對健康產品的看法。", status: "待執行", tags: ["招募"] },
-  { id: "i4", date: "2025-04-05", partnerId: "p2", type: "規劃", title: "月底對帳確認", content: "確認三月獎金計算是否正確。", status: "待執行", tags: ["財務"] },
-  { id: "i5", date: "2025-03-30", partnerId: "p4", type: "暖身", title: "談場前資料準備", content: "確認見面時間地點，準備產品介紹資料。", status: "待執行", tags: ["招募"] },
+  { id: "i1", date: "2025-03-24", time: "10:30:00", partnerId: "p2", type: "暖身", title: "Q2 業績規劃", content: "討論了四月份的推廣策略。", status: "已完成", tags: ["業績"] },
+  { id: "i2", date: "2025-03-27", time: "14:10:00", partnerId: "p2", type: "追蹤", title: "新人教學跟進", content: "陳威宇詢問產品數據整理方式，分享了追蹤表格模板。", status: "已完成", tags: ["教學"] },
+  { id: "i3", date: "2025-04-02", time: "09:00:00", partnerId: "p3", type: "規劃", title: "邀約 IG 合作聊聊", content: "計劃傳訊問她對健康產品的看法。", status: "待執行", tags: ["招募"] },
+  { id: "i4", date: "2025-04-05", time: "18:20:00", partnerId: "p2", type: "規劃", title: "月底對帳確認", content: "確認三月獎金計算是否正確。", status: "待執行", tags: ["財務"] },
+  { id: "i5", date: "2025-03-30", time: "16:45:00", partnerId: "p4", type: "暖身", title: "談場前資料準備", content: "確認見面時間地點，準備產品介紹資料。", status: "待執行", tags: ["招募"] },
 ];
 const SEED_TODOS = [
   { id: "t1", title: "準備四月開團文案", done: false, priority: "高", dueDate: "2025-04-03" },
@@ -136,6 +136,18 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 const fmt = (d) => { try { return new Date(d + "T00:00:00").toLocaleDateString("zh-TW", { month: "short", day: "numeric" }); } catch { return d; } };
 const fmtFullDate = (d) => { try { return new Date(d + "T00:00:00").toLocaleDateString("zh-TW", { year: "numeric", month: "2-digit", day: "2-digit" }); } catch { return d; } };
 const dk = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const normalizeTime = (t) => {
+  const s = String(t || "").trim();
+  if (!s) return "00:00:00";
+  if (/^\d{2}:\d{2}$/.test(s)) return `${s}:00`;
+  if (/^\d{2}:\d{2}:\d{2}$/.test(s)) return s;
+  return "00:00:00";
+};
+const nowHms = () => {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`;
+};
+const toMsDT = (date, time) => new Date(`${date}T${normalizeTime(time)}`).getTime();
 
 /** 人脈 CSV：第一列標題對應（Excel 另存 UTF-8 CSV，逗號或 TAB 皆可） */
 const PARTNER_CSV_COLUMNS_DOC = [
@@ -663,9 +675,13 @@ export default function App() {
       setPartners(migratedPartners);
       if (loadedPartners.some(p => p.role === "夥伴" || p.role === "拒絕")) save(KEYS.partners, migratedPartners);
       const rawIx = (await load(KEYS.interactions)) || SEED_INTERACTIONS;
-      const migratedIx = rawIx.map(i => (i.type === "討論" ? { ...i, type: "暖身" } : i));
+      const migratedIx = rawIx.map(i => {
+        const nextType = i.type === "討論" ? "暖身" : i.type;
+        const nextTime = i.time != null && String(i.time).trim() !== "" ? normalizeTime(i.time) : "00:00:00";
+        return (nextType !== i.type || nextTime !== (i.time || "")) ? { ...i, type: nextType, time: nextTime } : i;
+      });
       setInteractions(migratedIx);
-      if (rawIx.some(i => i.type === "討論")) save(KEYS.interactions, migratedIx);
+      if (rawIx.some(i => i.type === "討論" || !(i.time != null && String(i.time).trim() !== ""))) save(KEYS.interactions, migratedIx);
       setTodos((await load(KEYS.todos)) || SEED_TODOS);
       setQuotes((await load(KEYS.quotes)) || SEED_QUOTES);
       setGoals((await load(KEYS.goals)) || SEED_GOALS);
@@ -752,7 +768,9 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
   const pct = (v,m) => Math.min(100, Math.round((v/(m||1))*100));
 
   // Pending items from time axis (interactions with status 待執行)
-  const pendingInteractions = interactions.filter(i=>i.status==="待執行").sort((a,b)=>a.date.localeCompare(b.date));
+  const pendingInteractions = interactions
+    .filter(i=>i.status==="待執行")
+    .sort((a,b)=>toMsDT(a.date,a.time) - toMsDT(b.date,b.time));
   const toggleInteraction = (id) => setInteractions(interactions.map(i=>i.id===id?{...i,status:"已完成"}:i));
 
   const openIncomeNew = () => {
@@ -1205,6 +1223,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     setInteractionDraft({
       id: uid(),
       date: new Date().toISOString().slice(0,10),
+      time: nowHms(),
       partnerId: selected.id,
       type: "暖身",
       title: "",
@@ -1223,6 +1242,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     setInteractionDraft({
       ...it,
       partnerId: selected?.id || it.partnerId,
+      time: it.time ? normalizeTime(it.time) : "00:00:00",
       tags: Array.isArray(it.tags) ? it.tags.join("、") : (it.tags || ""),
       partnerPlan: it.type === "上線會議" ? mergeMeetingPlanFields(it.partnerPlan, it.actionItems) : (it.partnerPlan || ""),
       actionItems: it.type === "上線會議" ? "" : (it.actionItems || ""),
@@ -1248,7 +1268,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
   const saveInteraction = () => {
     if (!selected || !interactionDraft) return;
     const tagsArr = normalizeTags(interactionDraft.tags);
-    const entry = { ...interactionDraft, tags: tagsArr, partnerId: selected.id };
+    const entry = { ...interactionDraft, time: normalizeTime(interactionDraft.time), tags: tagsArr, partnerId: selected.id };
     if (entry.type === "上線會議") entry.actionItems = "";
 
     // 新增/編輯互動主紀錄
@@ -1469,7 +1489,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
                   <div className={`tl-dot type-${i.type}`} style={{marginTop:5}}/>
                   <div style={{flex:1}}>
                     <div className="flex items-center gap-6"><span className="text-sm" style={{fontWeight:600}}>{i.title}</span><span className={`status-badge status-${i.status}`}>{i.status}</span></div>
-                    <div className="text-xs mono text-muted mt-3">{i.date} · {i.type}</div>
+                    <div className="text-xs mono text-muted mt-3">{i.date} {normalizeTime(i.time)} · {i.type}</div>
                     {i.content&&<div className="text-sm text-muted mt-4" style={{lineHeight:1.7}}>{i.content}</div>}
                     {i.type==="上線會議"&&mergeMeetingPlanFields(i.partnerPlan,i.actionItems)&&(
                       <div className="text-sm text-muted mt-4" style={{lineHeight:1.7,whiteSpace:"pre-wrap"}}><span className="label" style={{display:"block",marginBottom:4}}>具體規劃與待辦</span>{mergeMeetingPlanFields(i.partnerPlan,i.actionItems)}</div>
@@ -1491,6 +1511,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
         <Modal title={interactionEditMode==="new"?"新增互動":"編輯互動"} onClose={()=>setShowInteractionForm(false)} wide>
           <div className="form-row">
             <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={interactionDraft.date} onChange={e=>setInteractionDraft({...interactionDraft,date:e.target.value})}/></div>
+            <div className="form-group"><label className="label">時間（時:分:秒）</label><input type="time" step="1" className="input" value={normalizeTime(interactionDraft.time)} onChange={e=>setInteractionDraft({...interactionDraft,time:e.target.value})}/></div>
             <div className="form-group"><label className="label">類型</label>
               <select className="input" value={interactionDraft.type} onChange={e=>setInteractionDraft({...interactionDraft,type:e.target.value})}>
                 {["暖身","追蹤","規劃","上線會議"].map(t=><option key={t}>{t}</option>)}
@@ -1684,11 +1705,12 @@ function Timeline({ interactions, setInteractions, partners }) {
 
   const sorted = [...interactions].sort((a, b) => {
     const todayMs = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00").getTime();
-    const toMs = (s) => new Date(s + "T00:00:00").getTime();
-    const da = Math.abs(toMs(a.date) - todayMs);
-    const db = Math.abs(toMs(b.date) - todayMs);
+    const da = Math.abs(toMsDT(a.date, a.time) - todayMs);
+    const db = Math.abs(toMsDT(b.date, b.time) - todayMs);
     if (da !== db) return da - db; // 越接近今天越上面
-    return a.date.localeCompare(b.date); // 同距離：日期較早
+    const d = a.date.localeCompare(b.date); // 同距離：日期較早
+    if (d !== 0) return d;
+    return normalizeTime(a.time).localeCompare(normalizeTime(b.time)); // 同日：較早時間在前
   });
   const filtered = filter==="全部"?sorted:filter==="待執行"?sorted.filter(i=>i.status==="待執行"):sorted.filter(i=>i.type===filter);
   const getP = (id) => partners.find(p=>p.id===id);
@@ -1699,6 +1721,7 @@ function Timeline({ interactions, setInteractions, partners }) {
       p.dateTalkVenue && isYmd(p.dateTalkVenue) ? {
         id: `ps-talk-${p.id}`,
         date: p.dateTalkVenue,
+        time: "00:00:00",
         partnerId: p.id,
         type: "談場",
         title: "談場",
@@ -1708,6 +1731,7 @@ function Timeline({ interactions, setInteractions, partners }) {
       p.dateTeamActivity && isYmd(p.dateTeamActivity) ? {
         id: `ps-team-${p.id}`,
         date: p.dateTeamActivity,
+        time: "00:00:00",
         partnerId: p.id,
         type: "團隊活動",
         title: "團隊活動",
@@ -1717,6 +1741,7 @@ function Timeline({ interactions, setInteractions, partners }) {
       p.dateWarmupPhysical && isYmd(p.dateWarmupPhysical) ? {
         id: `ps-warm-${p.id}`,
         date: p.dateWarmupPhysical,
+        time: "00:00:00",
         partnerId: p.id,
         type: "實體暖身",
         title: "實體暖身",
@@ -1726,9 +1751,9 @@ function Timeline({ interactions, setInteractions, partners }) {
     ])).filter(Boolean);
   const calendarItems = [...interactions, ...partnerScheduleItems];
 
-  const openNew = () => { setEditData({id:uid(),date:new Date().toISOString().slice(0,10),partnerId:"",type:"暖身",title:"",content:"",status:"待執行",tags:"",partnerPlan:"",actionItems:"",quote:""}); setShowForm(true); };
+  const openNew = () => { setEditData({id:uid(),date:new Date().toISOString().slice(0,10),time:nowHms(),partnerId:"",type:"暖身",title:"",content:"",status:"待執行",tags:"",partnerPlan:"",actionItems:"",quote:""}); setShowForm(true); };
   const saveItem = () => {
-    const entry = { ...editData, tags: editData.tags ? editData.tags.split(/[、,，]/).map(t => t.trim()).filter(Boolean) : [] };
+    const entry = { ...editData, time: normalizeTime(editData.time), tags: editData.tags ? editData.tags.split(/[、,，]/).map(t => t.trim()).filter(Boolean) : [] };
     if (entry.type === "上線會議") entry.actionItems = "";
     let next = interactions.find(i => i.id === entry.id) ? interactions.map(i => i.id === entry.id ? entry : i) : [...interactions, entry];
     if (entry.type === "上線會議") {
@@ -1803,7 +1828,7 @@ function Timeline({ interactions, setInteractions, partners }) {
                     </div>
                     {p&&<div className="flex items-center gap-6 mt-4"><div className="avatar" style={{width:18,height:18,fontSize:9}}>{p.avatar}</div><span className="text-xs text-muted">{p.name}</span></div>}
                     {item.content&&<div className="text-sm text-muted mt-4" style={{lineHeight:1.6}}>{item.content}</div>}
-                    <div className="text-xs mono" style={{color:"var(--text3)",marginTop:3}}>{item.date}</div>
+                    <div className="text-xs mono" style={{color:"var(--text3)",marginTop:3}}>{item.date} {normalizeTime(item.time)}</div>
                   </div>
                   <button className={`btn btn-sm ${item.status==="已完成"?"btn-gold":"btn-ghost"}`} style={{flexShrink:0,alignSelf:"flex-start"}} onClick={e=>{e.stopPropagation();toggle(item.id);}}>{item.status==="已完成"?"✓":"○"}</button>
                 </div>
@@ -1831,12 +1856,13 @@ function Timeline({ interactions, setInteractions, partners }) {
               const k=dk(cell.date);
               const dayItems=iMap[k]||[];
               const todayMs = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00").getTime();
-              const toMs = (s) => new Date(s + "T00:00:00").getTime();
               const dayItemsSorted = [...dayItems].sort((a, b) => {
-                const da = Math.abs(toMs(a.date) - todayMs);
-                const db = Math.abs(toMs(b.date) - todayMs);
+                const da = Math.abs(toMsDT(a.date, a.time) - todayMs);
+                const db = Math.abs(toMsDT(b.date, b.time) - todayMs);
                 if (da !== db) return da - db; // 越接近今天越靠上
-                return b.date.localeCompare(a.date); // 距離相同：較新的在前
+                const d = b.date.localeCompare(a.date); // 距離相同：較新的在前
+                if (d !== 0) return d;
+                return normalizeTime(b.time).localeCompare(normalizeTime(a.time)); // 同日：較晚時間在前
               });
               return (
                 <div key={i} className={`cal-cell${k===today?" today":""}${!cell.cur?" other-month":""}`}>
@@ -1844,8 +1870,8 @@ function Timeline({ interactions, setInteractions, partners }) {
                   {dayItemsSorted.slice(0,3).map(it=>{
                     const p=getP(it.partnerId);
                     return (
-                      <div key={it.id} className={`cal-event type-${it.type}`} onClick={()=>setSelected(it)} title={`${it.title} ${p?`· ${p.name}`:""} ${it.date}`}>
-                        {it.title}{p?` · ${p.name}`:""}
+                      <div key={it.id} className={`cal-event type-${it.type}`} onClick={()=>setSelected(it)} title={`${it.title} ${p?`· ${p.name}`:""} ${it.date} ${normalizeTime(it.time)}`}>
+                        {normalizeTime(it.time)} {it.title}{p?` · ${p.name}`:""}
                       </div>
                     );
                   })}
@@ -1879,7 +1905,7 @@ function Timeline({ interactions, setInteractions, partners }) {
                         {!item.isPartnerSchedule && <span className={`status-badge status-${item.status}`}>{item.status}</span>}
                         <span className="tag">{item.type}</span>
                       </div>
-                      <div className="text-xs mono text-muted mt-3">{item.date}{p&&<span> · {p.name}</span>}</div>
+                      <div className="text-xs mono text-muted mt-3">{item.date} {normalizeTime(item.time)}{p&&<span> · {p.name}</span>}</div>
                     </div>
                     {!item.isPartnerSchedule && <button className={`btn btn-sm ${item.status==="已完成"?"btn-gold":"btn-ghost"}`} style={{flexShrink:0,alignSelf:"flex-start"}} onClick={e=>{e.stopPropagation();toggle(item.id);}}>{item.status==="已完成"?"✓":"○"}</button>}
                   </div>
@@ -1924,6 +1950,7 @@ function Timeline({ interactions, setInteractions, partners }) {
         <Modal title={`${interactions.find(i=>i.id===editData.id)?"編輯":"新增"}紀錄`} onClose={()=>setShowForm(false)} wide>
           <div className="form-row">
             <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={editData.date} onChange={e=>setEditData({...editData,date:e.target.value})}/></div>
+            <div className="form-group"><label className="label">時間（時:分:秒）</label><input type="time" step="1" className="input" value={normalizeTime(editData.time)} onChange={e=>setEditData({...editData,time:e.target.value})}/></div>
             <div className="form-group"><label className="label">類型</label>
               <select className="input" value={editData.type} onChange={e=>setEditData({...editData,type:e.target.value,partnerId:e.target.value==="上線會議"?"":editData.partnerId})}>
                 {["暖身","追蹤","規劃","上線會議"].map(t=><option key={t}>{t}</option>)}
@@ -2171,7 +2198,7 @@ function AICoach({ partners, interactions, todos }) {
 
   const buildSystem = () => {
     const ps=partners.filter(p=>p.role!=="上線").map(p=>`- ${p.name}（${p.role}）：備註 ${p.memo||p.notes||"無"}，痛點 ${p.painPoint||"無"}，關係 ${p.relation||"無"}`).join("\n");
-    const ri=[...interactions].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,8).map(i=>{const p=partners.find(x=>x.id===i.partnerId);return `- [${i.date}] ${i.type}｜${i.title}（${p?.name||"無"}）：${i.status}`;}).join("\n");
+  const ri=[...interactions].sort((a,b)=>toMsDT(b.date,b.time) - toMsDT(a.date,a.time)).slice(0,8).map(i=>{const p=partners.find(x=>x.id===i.partnerId);return `- [${i.date} ${normalizeTime(i.time)}] ${i.type}｜${i.title}（${p?.name||"無"}）：${i.status}`;}).join("\n");
     const pt=todos.filter(t=>!t.done).map(t=>`- ${t.title}`).join("\n");
     const rp=selP?partners.find(p=>p.id===selP):null;
     if(mode==="advice") return `你是電商直銷人脈經營顧問，親切實際，使用繁體中文。\n【夥伴】\n${ps}\n【近期互動】\n${ri}\n【待辦】\n${pt}\n根據資料給具體行動建議，條列清楚。`;
