@@ -1186,29 +1186,33 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       <div className="flex items-center justify-between mb-16" style={{ flexWrap: "wrap", gap: 12 }}>
         <h2 className="heading" style={{margin:0}}>人脈網絡 <span className="text-muted mono" style={{fontSize:12}}>({nonUplines.length})</span></h2>
         <div className="flex items-center gap-8" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <select className="input" style={{minWidth:140}} value={fieldFilters.gender} onChange={e=>setFieldFilters({...fieldFilters,gender:e.target.value})}>
+          <input ref={csvInputRef} type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={onPickPartnerCsv} />
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => csvInputRef.current?.click()}>📥 匯入 CSV</button>
+          <button className="btn btn-gold btn-sm" onClick={openNew}>＋ 新增</button>
+        </div>
+      </div>
+      <div className="flex items-center justify-between mb-14" style={{ flexWrap: "wrap", gap: 10 }}>
+        <div className="flex items-center" style={{ flexWrap: "wrap", gap: 8 }}>
+          {filterGroups.map(r=><button key={r} className={`btn btn-sm ${filter===r?"btn-gold":"btn-ghost"}`} onClick={()=>setFilter(r)}>{r}</button>)}
+        </div>
+        <div className="flex items-center" style={{ flexWrap: "wrap", gap: 8, justifyContent: "flex-end" }}>
+          <select className="input" style={{ minWidth: 120 }} value={fieldFilters.gender} onChange={e=>setFieldFilters({...fieldFilters,gender:e.target.value})}>
             {(fieldOptions.gender || ["全部"]).map(v=><option key={v} value={v}>性別：{v}</option>)}
           </select>
-          <select className="input" style={{minWidth:140}} value={fieldFilters.region} onChange={e=>setFieldFilters({...fieldFilters,region:e.target.value})}>
+          <select className="input" style={{ minWidth: 120 }} value={fieldFilters.region} onChange={e=>setFieldFilters({...fieldFilters,region:e.target.value})}>
             {(fieldOptions.region || ["全部"]).map(v=><option key={v} value={v}>地區：{v}</option>)}
           </select>
-          <select className="input" style={{minWidth:140}} value={fieldFilters.attribute} onChange={e=>setFieldFilters({...fieldFilters,attribute:e.target.value})}>
+          <select className="input" style={{ minWidth: 120 }} value={fieldFilters.attribute} onChange={e=>setFieldFilters({...fieldFilters,attribute:e.target.value})}>
             {(fieldOptions.attribute || ["全部"]).map(v=><option key={v} value={v}>屬性：{v}</option>)}
           </select>
-          <select className="input" style={{minWidth:150}} value={sortBy} onChange={e=>setSortBy(e.target.value)}>
+          <select className="input" style={{ minWidth: 130 }} value={sortBy} onChange={e=>setSortBy(e.target.value)}>
             <option value="default">排序：預設</option>
             <option value="region-asc">排序：地區 A→Z</option>
             <option value="region-desc">排序：地區 Z→A</option>
             <option value="attribute-asc">排序：屬性 A→Z</option>
             <option value="attribute-desc">排序：屬性 Z→A</option>
           </select>
-          <input ref={csvInputRef} type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={onPickPartnerCsv} />
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => csvInputRef.current?.click()}>📥 匯入 CSV</button>
-          <button className="btn btn-gold btn-sm" onClick={openNew}>＋ 新增</button>
         </div>
-      </div>
-      <div className="flex gap-8 mb-14" style={{flexWrap:"wrap"}}>
-        {filterGroups.map(r=><button key={r} className={`btn btn-sm ${filter===r?"btn-gold":"btn-ghost"}`} onClick={()=>setFilter(r)}>{r}</button>)}
       </div>
       <div className="grid-3">
         {filtered.map(p=>(
