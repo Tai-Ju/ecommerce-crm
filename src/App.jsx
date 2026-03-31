@@ -136,6 +136,166 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 const fmt = (d) => { try { return new Date(d + "T00:00:00").toLocaleDateString("zh-TW", { month: "short", day: "numeric" }); } catch { return d; } };
 const dk = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 
+/** 人脈 CSV：第一列標題對應（Excel 另存 UTF-8 CSV，逗號或 TAB 皆可） */
+const PARTNER_CSV_COLUMNS_DOC = [
+  "姓名",
+  "身份/狀態",
+  "屬性",
+  "痛點需求（長標題含「痛點」「需求」亦可）",
+  "地區",
+  "休假",
+  "性別",
+  "關係",
+  "年齡",
+  "職業",
+  "薪資",
+  "談場（日期）",
+  "備註",
+];
+
+function parseCsvDelimitedLine(line, delimiter) {
+  const row = [];
+  if (delimiter === "\t") {
+    return line.split("\t").map((c) => c.trim().replace(/^"|"$/g, "").replace(/""/g, '"'));
+  }
+  let cur = "";
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') {
+      if (inQ && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else inQ = !inQ;
+    } else if (c === "," && !inQ) {
+      row.push(cur.trim());
+      cur = "";
+    } else cur += c;
+  }
+  row.push(cur.trim());
+  return row.map((c) => c.replace(/^"|"$/g, "").replace(/""/g, '"'));
+}
+
+function detectPartnerCsvDelimiter(headerLine) {
+  const tabs = (headerLine.match(/\t/g) || []).length;
+  const commas = (headerLine.match(/,/g) || []).length;
+  return tabs > commas ? "\t" : ",";
+}
+
+function mapPartnerCsvHeader(cell) {
+  const hn = String(cell).replace(/^\uFEFF/, "").trim();
+  const compact = hn.replace(/\s/g, "");
+  const exact = {
+    姓名: "name",
+    "身份/狀態": "role",
+    屬性: "attribute",
+    痛點需求: "painPoint",
+    地區: "region",
+    休假: "vacation",
+    性別: "gender",
+    關係: "relation",
+    年齡: "age",
+    職業: "occupation",
+    薪資: "salary",
+    "談場（日期）": "dateTalkVenue",
+    談場: "dateTalkVenue",
+    備註: "memo",
+  };
+  if (exact[hn]) return exact[hn];
+  for (const [k, v] of Object.entries(exact)) {
+    if (k.replace(/\s/g, "") === compact) return v;
+  }
+  if (hn.includes("痛點") && (hn.includes("需求") || hn.includes("困擾"))) return "painPoint";
+  if (/談場/.test(hn) && hn.includes("日期")) return "dateTalkVenue";
+  return null;
+}
+
+function parsePartnerDateCell(raw) {
+  const t = String(raw ?? "").trim();
+  if (!t) return "";
+  if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(t)) {
+    const [y, mo, d] = t.split("-").map((x) => parseInt(x, 10));
+    return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  }
+  const m = t.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  const n = Number(t);
+  if (!Number.isNaN(n) && n > 20000 && n < 60000) {
+    const epoch = new Date(1899, 11, 30);
+    const d = new Date(epoch.getTime() + n * 86400000);
+    if (!Number.isNaN(d.getTime())) return dk(d);
+  }
+  return "";
+}
+
+function normalizeImportedRole(r) {
+  let x = String(r ?? "").trim();
+  if (x === "夥伴") x = "已加入";
+  if (NON_UPLINE_ROLES.includes(x)) return x;
+  return "暖身中";
+}
+
+/** @returns {{ rows: object[], skippedEmpty: number, errors: string[] }} */
+function parsePartnerCsvText(text) {
+  const raw = String(text).replace(/^\uFEFF/, "");
+  const lines = raw.split(/\r?\n/).filter((ln) => ln.trim() !== "");
+  if (!lines.length) return { rows: [], skippedEmpty: 0, errors: ["檔案沒有內容"] };
+  const delim = detectPartnerCsvDelimiter(lines[0]);
+  const headers = parseCsvDelimitedLine(lines[0], delim);
+  const fieldIx = headers.map(mapPartnerCsvHeader);
+  if (!fieldIx.includes("name")) {
+    return { rows: [], skippedEmpty: 0, errors: ["找不到「姓名」欄：請確認第一列標題與範本一致（需含「姓名」）"] };
+  }
+  const rows = [];
+  const errors = [];
+  let skippedEmpty = 0;
+  for (let i = 1; i < lines.length; i++) {
+    const cells = parseCsvDelimitedLine(lines[i], delim);
+    const row = {};
+    fieldIx.forEach((key, j) => {
+      if (!key) return;
+      row[key] = cells[j] !== undefined ? cells[j] : "";
+    });
+    const name = String(row.name ?? "").trim();
+    if (!name) {
+      skippedEmpty++;
+      continue;
+    }
+    let age = "";
+    if (row.age !== undefined && String(row.age).trim() !== "") {
+      const num = Number(String(row.age).replace(/,/g, "").trim());
+      age = Number.isNaN(num) ? "" : num;
+    }
+    rows.push({
+      id: uid(),
+      name,
+      role: normalizeImportedRole(row.role),
+      avatar: name[0] || "?",
+      photo: "",
+      attribute: String(row.attribute ?? "").trim(),
+      painPoint: String(row.painPoint ?? "").trim(),
+      region: String(row.region ?? "").trim(),
+      vacation: String(row.vacation ?? "").trim(),
+      memo: String(row.memo ?? "").trim(),
+      gender: String(row.gender ?? "").trim(),
+      relation: String(row.relation ?? "").trim(),
+      age,
+      occupation: String(row.occupation ?? "").trim(),
+      salary: String(row.salary ?? "").trim(),
+      dateTalkVenue: parsePartnerDateCell(row.dateTalkVenue),
+      dateTeamActivity: "",
+      dateWarmupPhysical: "",
+      costs: [],
+      abcNote: ABC_TEMPLATE,
+      joined: new Date().toISOString().slice(0, 10),
+    });
+  }
+  if (!rows.length && !errors.length) {
+    errors.push(skippedEmpty > 0 ? "沒有可匯入的資料列（是否皆缺少姓名？）" : "沒有資料列");
+  }
+  return { rows, skippedEmpty, errors };
+}
+
 function removeInteractionsSyncedFromMeeting(interactions, meetingId) {
   return interactions.filter(i => i.fromMeetingId !== meetingId);
 }
@@ -760,6 +920,9 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
   const [interactionDraft, setInteractionDraft] = useState(null);
   const [interactionEditMode, setInteractionEditMode] = useState("new"); // new | edit
 
+  const csvInputRef = useRef(null);
+  const [importModal, setImportModal] = useState(null); // { rows, skippedEmpty, errors, fileLabel }
+
   const nonUplines = partners.filter(p=>p.role!=="上線");
   const filterGroups = ["全部",...RECRUIT_ROLES];
   const filterableFields = [
@@ -996,6 +1159,28 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     navigator.clipboard.writeText(selected?.abcNote||"").then(()=>{ setCopied(true); setTimeout(()=>setCopied(false),2000); });
   };
 
+  const onPickPartnerCsv = (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const parsed = parsePartnerCsvText(String(reader.result || ""));
+      setImportModal({ ...parsed, fileLabel: f.name });
+    };
+    reader.onerror = () => setImportModal({ rows: [], skippedEmpty: 0, errors: ["無法讀取檔案"], fileLabel: f.name });
+    reader.readAsText(f, "UTF-8");
+  };
+
+  const confirmPartnerImport = () => {
+    if (!importModal?.rows?.length) {
+      setImportModal(null);
+      return;
+    }
+    setPartners([...partners, ...importModal.rows]);
+    setImportModal(null);
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between mb-16">
@@ -1017,6 +1202,8 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             <option value="attribute-asc">排序：屬性 A→Z</option>
             <option value="attribute-desc">排序：屬性 Z→A</option>
           </select>
+          <input ref={csvInputRef} type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={onPickPartnerCsv} />
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => csvInputRef.current?.click()}>📥 匯入 CSV</button>
           <button className="btn btn-gold btn-sm" onClick={openNew}>＋ 新增</button>
         </div>
       </div>
@@ -1190,6 +1377,55 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             <div className="form-group"><label className="label">標籤（逗號/頓號分隔）</label><input className="input" value={interactionDraft.tags} onChange={e=>setInteractionDraft({...interactionDraft,tags:e.target.value})}/></div>
           </div>
           <div className="flex gap-8 mt-12"><button className="btn btn-gold" onClick={saveInteraction}>儲存</button><button className="btn btn-ghost" onClick={()=>setShowInteractionForm(false)}>取消</button></div>
+        </Modal>
+      )}
+
+      {importModal && (
+        <Modal title="匯入人脈 CSV" onClose={() => setImportModal(null)}>
+          <div className="text-xs text-muted mb-10" style={{ lineHeight: 1.7 }}>
+            請在 Excel <strong>另存新檔 → CSV UTF-8（逗號分隔）</strong>；若欄位內容含逗號，Excel 會自動加引號，本工具可解析。
+            第一列請使用下列標題（順序可調，<strong>姓名</strong> 必填）：
+          </div>
+          <ul className="text-sm mono mb-14" style={{ lineHeight: 1.8, paddingLeft: 18, color: "var(--text2)" }}>
+            {PARTNER_CSV_COLUMNS_DOC.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+          {importModal.fileLabel && (
+            <div className="text-sm mb-8">
+              檔案：<span className="mono">{importModal.fileLabel}</span>
+            </div>
+          )}
+          {importModal.errors?.length > 0 && (
+            <div className="card-sm mb-10" style={{ borderColor: "var(--red)", background: "rgba(192,57,43,0.06)" }}>
+              {importModal.errors.map((err) => (
+                <div key={err} className="text-sm" style={{ color: "var(--red)" }}>
+                  {err}
+                </div>
+              ))}
+            </div>
+          )}
+          {importModal.rows?.length > 0 && (
+            <div className="text-sm mb-10">
+              可匯入 <strong>{importModal.rows.length}</strong> 筆（將附加到現有名單）
+              {importModal.skippedEmpty > 0 && (
+                <span className="text-muted"> · 已略過 {importModal.skippedEmpty} 列（無姓名）</span>
+              )}
+            </div>
+          )}
+          <div className="flex gap-8">
+            <button
+              type="button"
+              className="btn btn-gold"
+              disabled={!importModal.rows?.length}
+              onClick={confirmPartnerImport}
+            >
+              確認匯入
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={() => setImportModal(null)}>
+              取消
+            </button>
+          </div>
         </Modal>
       )}
 
