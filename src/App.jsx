@@ -1,0 +1,1655 @@
+import { useState, useEffect, useCallback, useRef } from "react";
+
+// ─── Storage：MongoDB 後端（設 VITE_CRM_API_URL + VITE_CRM_API_TOKEN）或本機 window.storage ──
+const KEYS = {
+  partners: "crm3:partners",
+  interactions: "crm3:interactions",
+  todos: "crm3:todos",
+  quotes: "crm3:quotes",
+  goals: "crm3:goals",
+  playbook: "crm3:playbook",
+  manifest: "crm3:manifest",
+  incomes: "crm3:incomes",
+};
+
+function getCrmApi() {
+  const base = import.meta.env.VITE_CRM_API_URL?.replace(/\/$/, "");
+  const token = import.meta.env.VITE_CRM_API_TOKEN;
+  if (base && token) return { base, token };
+  return null;
+}
+
+async function load(key) {
+  const api = getCrmApi();
+  if (api) {
+    try {
+      const res = await fetch(`${api.base}/api/kv/${encodeURIComponent(key)}`, {
+        headers: { Authorization: `Bearer ${api.token}` },
+      });
+      if (res.status === 404) return null;
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const r = await window.storage.get(key, true);
+    return r ? JSON.parse(r.value) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function save(key, val) {
+  const api = getCrmApi();
+  if (api) {
+    try {
+      await fetch(`${api.base}/api/kv/${encodeURIComponent(key)}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${api.token}`,
+        },
+        body: JSON.stringify(val),
+      });
+    } catch { /* ignore (non-blocking save) */ }
+    return;
+  }
+  try {
+    await window.storage.set(key, JSON.stringify(val), true);
+  } catch { /* ignore (non-blocking save) */ }
+}
+
+// ─── Constants ────────────────────────────────────────────────────
+const RECRUIT_ROLES = ["未加入", "暖身中", "確定談場", "跟進中", "拒絕", "已加入"];
+// 非上線狀態只保留招募漏斗角色（把「夥伴」視為已加入移除重疊）
+const NON_UPLINE_ROLES = [...RECRUIT_ROLES];
+const COST_TYPES = ["訂金", "買貨", "加盟"];
+const TYPE_COLOR = { 訂金: "#4a90d9", 買貨: "#b8860b", 加盟: "#c0392b" };
+const RECRUIT_COLOR = { 未加入: "#aaa", 暖身中: "#4a90d9", 確定談場: "#b8860b", 跟進中: "#8b5cf6", 拒絕: "#c0392b", 已加入: "#27ae60" };
+
+const ABC_TEMPLATE = `C角：
+B角：
+A角：
+BC角關係：
+認識多久：
+談場日期：
+談場時間：
+談場地點：
+
+--- C角資料 ---
+性別：
+年齡：
+星座：
+婚姻：
+職業：
+月收入：
+個性特質：
+經濟狀況：
+邀約方式：
+需求動機：
+短期目標：
+未來夢想：
+同業經驗：
+禁忌話題：
+溝通重點：
+特別備註：`;
+
+// ─── Seeds ────────────────────────────────────────────────────────
+const SEED_PARTNERS = [
+  { id: "p2", name: "陳威宇", role: "夥伴", avatar: "陳", phone: "0923-456-789", ig: "@weiyuchen88", birthday: "1988-07-22", tags: ["健身", "科技"], notes: "對數據很敏感，喜歡看成效報告。", costs: [{ id: "c3", date: "2024-03-05", type: "訂金", amount: 2000, note: "訂金預繳" }], abcNote: "", joined: "2024-03-05" },
+  { id: "p3", name: "王思涵", role: "暖身中", avatar: "王", phone: "0934-567-890", ig: "@sihan_w", birthday: "1995-11-08", tags: ["美妝", "旅遊"], notes: "IG 粉絲約 1.2 萬，風格乾淨。", costs: [], abcNote: "", joined: "2024-05-20" },
+  { id: "p4", name: "張育豪", role: "確定談場", avatar: "張", phone: "0945-678-901", ig: "@yu_hao88", birthday: "1992-06-14", tags: ["創業", "健康"], notes: "下週五約好了，準備資料。", costs: [], abcNote: ABC_TEMPLATE, joined: "2025-03-01" },
+  { id: "p5", name: "李美玲", role: "拒絕", avatar: "李", phone: "0956-789-012", ig: "@meiling_li", birthday: "1988-09-03", tags: ["家庭"], notes: "目前說不考慮，半年後再聯繫。", costs: [], abcNote: "", joined: "2025-01-15" },
+];
+const SEED_INTERACTIONS = [
+  { id: "i1", date: "2025-03-24", partnerId: "p2", type: "暖身", title: "Q2 業績規劃", content: "討論了四月份的推廣策略。", status: "已完成", tags: ["業績"] },
+  { id: "i2", date: "2025-03-27", partnerId: "p2", type: "追蹤", title: "新人教學跟進", content: "陳威宇詢問產品數據整理方式，分享了追蹤表格模板。", status: "已完成", tags: ["教學"] },
+  { id: "i3", date: "2025-04-02", partnerId: "p3", type: "規劃", title: "邀約 IG 合作聊聊", content: "計劃傳訊問她對健康產品的看法。", status: "待執行", tags: ["招募"] },
+  { id: "i4", date: "2025-04-05", partnerId: "p2", type: "規劃", title: "月底對帳確認", content: "確認三月獎金計算是否正確。", status: "待執行", tags: ["財務"] },
+  { id: "i5", date: "2025-03-30", partnerId: "p4", type: "暖身", title: "談場前資料準備", content: "確認見面時間地點，準備產品介紹資料。", status: "待執行", tags: ["招募"] },
+];
+const SEED_TODOS = [
+  { id: "t1", title: "準備四月開團文案", done: false, priority: "高", dueDate: "2025-04-03" },
+  { id: "t2", title: "傳送產品資料給王思涵", done: false, priority: "中", dueDate: "2025-04-02" },
+  { id: "t3", title: "更新三月業績表", done: true, priority: "高", dueDate: "2025-03-31" },
+];
+const SEED_QUOTES = [
+  { id: "q1", text: "成功不是終點，失敗也不是末日，重要的是繼續前行的勇氣。", author: "邱吉爾", date: "2025-03-20" },
+  { id: "q2", text: "你現在的選擇，決定了五年後的你是誰。", author: "上線林佳蓉", date: "2025-03-15" },
+];
+const SEED_GOALS = { monthlyIncome: 15000, monthlyPartners: 5 };
+const SEED_PLAYBOOK = [
+  { id: "pb1", category: "開口邀約", situation: "對方說「我沒有時間」", response: "「我完全理解！這個其實不需要很多時間，很多夥伴都是利用零碎時間在做。你平常什麼時候最有空？我們約 15 分鐘聊一下就好。」", tags: ["拒絕處理"], star: true },
+  { id: "pb2", category: "產品說明", situation: "對方問「這個有沒有副作用？」", response: "「好問題！這系列產品都是天然成分，通過認證。但每個人體質不同，建議先從基礎款開始試。我可以把成分表傳給你看看。」", tags: ["產品"], star: true },
+  { id: "pb3", category: "跟進追蹤", situation: "傳訊之後對方已讀不回", response: "「等 2-3 天後再傳一則輕鬆的訊息，不提之前的事，可以分享一個使用心得。不要追問『你考慮得怎麼樣了』，讓對方感覺被關心而非被推銷。」", tags: ["跟進"], star: false },
+];
+const SEED_MANIFEST = {
+  declaration: "2025年底，我要擁有穩定的被動收入，讓家人過上更自由的生活。",
+  conditions: ["每天至少聯繫 2 位潛在夥伴", "每週至少完成 1 次談場", "保持正向心態，即使被拒絕也繼續前進"],
+};
+
+// ─── Utils ────────────────────────────────────────────────────────
+const uid = () => Math.random().toString(36).slice(2, 9);
+const fmt = (d) => { try { return new Date(d + "T00:00:00").toLocaleDateString("zh-TW", { month: "short", day: "numeric" }); } catch { return d; } };
+const dk = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+
+function removeInteractionsSyncedFromMeeting(interactions, meetingId) {
+  return interactions.filter(i => i.fromMeetingId !== meetingId);
+}
+
+/** 舊資料可能 split 在 partnerPlan / actionItems；編輯時合併為單一欄位顯示 */
+function mergeMeetingPlanFields(partnerPlan, actionItems) {
+  const a = String(partnerPlan || "").trim();
+  const b = String(actionItems || "").trim();
+  if (a && b) return `${a}\n${b}`;
+  return a || b;
+}
+
+function meetingPlanLinesForActions(planText) {
+  return String(planText || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+}
+
+/** 上線會議「具體規劃與待辦」中若出現人脈姓名，為其餘夥伴各建立一筆互動摘要（主關聯夥伴已有人脈內完整會議紀錄，不重複） */
+function buildPartnerPlanSyncEntries(meeting, partners) {
+  if (meeting.type !== "上線會議") return [];
+  const plan = String(mergeMeetingPlanFields(meeting.partnerPlan, meeting.actionItems)).trim();
+  if (!plan) return [];
+  const pool = partners.filter(p => p.role !== "上線" && p.name);
+  const ordered = [...pool].sort((a, b) => b.name.length - a.name.length);
+  const mentioned = [];
+  for (const p of ordered) {
+    if (!plan.includes(p.name)) continue;
+    if (meeting.partnerId && p.id === meeting.partnerId) continue;
+    if (mentioned.some(m => m.id === p.id)) continue;
+    mentioned.push(p);
+  }
+  if (mentioned.length === 0) return [];
+  const lines = plan.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const titleBase = meeting.title || "上線會議";
+  return mentioned.map(p => {
+    const relevant = lines.filter(l => l.includes(p.name));
+    const excerpt = relevant.length > 0 ? relevant.join("\n") : plan;
+    return {
+      id: uid(),
+      date: meeting.date,
+      partnerId: p.id,
+      type: "規劃",
+      title: `【上線會議】${titleBase}`,
+      content: `來自上線會議「${titleBase}」— 針對「${p.name}」的規劃：\n${excerpt}`,
+      status: meeting.status === "已完成" ? "已完成" : "待執行",
+      tags: ["上線會議", "規劃同步"],
+      partnerPlan: "",
+      actionItems: "",
+      quote: "",
+      fromMeetingId: meeting.id,
+    };
+  });
+}
+
+// ─── CSS (Light: white + gold) ────────────────────────────────────
+const css = `
+  @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;700&family=Noto+Serif+TC:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#faf9f6;
+    --bg2:#ffffff;
+    --bg3:#f4f2ed;
+    --gold:#b8860b;
+    --gold2:#d4a017;
+    --gold-light:#fef3c7;
+    --gold-border:#e8c84a;
+    --text:#1a1611;
+    --text2:#6b5e44;
+    --text3:#a89878;
+    --red:#c0392b;
+    --green:#27ae60;
+    --blue:#2563eb;
+    --purple:#7c3aed;
+    --border:#e8e0d0;
+    --border2:#d4c9b0;
+    --shadow:0 1px 4px rgba(0,0,0,.08);
+    --shadow-md:0 4px 16px rgba(0,0,0,.10);
+    --radius:12px;
+  }
+  body{background:var(--bg);color:var(--text);font-family:'Noto Serif TC',serif;min-height:100vh}
+  .app{display:flex;flex-direction:column;min-height:100vh;max-width:1280px;margin:0 auto}
+
+  /* ── Header ── */
+  .header{
+    padding:0 24px;height:56px;display:flex;align-items:stretch;justify-content:space-between;
+    border-bottom:2px solid var(--gold-border);background:#fff;
+    position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(184,134,11,.08);
+  }
+  .logo{font-family:'Playfair Display',serif;font-size:18px;color:var(--gold);letter-spacing:1px;display:flex;align-items:center;gap:10px;white-space:nowrap}
+  .logo-dot{width:8px;height:8px;border-radius:50%;background:var(--gold-border)}
+  .nav{display:flex;gap:0;overflow-x:auto;align-items:stretch}
+  .nav-btn{
+    background:none;border:none;color:var(--text2);cursor:pointer;
+    padding:0 14px;font-family:'Noto Serif TC',serif;font-size:12.5px;
+    border-bottom:3px solid transparent;transition:all .18s;white-space:nowrap;
+    display:flex;align-items:center;
+  }
+  .nav-btn.active{color:var(--gold);border-bottom-color:var(--gold);font-weight:700}
+  .nav-btn:hover:not(.active){color:var(--text);background:var(--bg3)}
+
+  /* ── Main ── */
+  .main{flex:1;padding:22px 24px;overflow-y:auto}
+
+  /* ── Cards ── */
+  .card{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}
+  .card-sm{background:var(--bg3);border:1px solid var(--border);border-radius:9px;padding:13px}
+  .card-gold{background:var(--gold-light);border:1px solid var(--gold-border);border-radius:var(--radius);padding:18px}
+
+  /* ── Grid ── */
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .grid-6{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+  @media(max-width:860px){.grid-3,.grid-4,.grid-6{grid-template-columns:1fr 1fr}}
+  @media(max-width:520px){.grid-2,.grid-3,.grid-4,.grid-6{grid-template-columns:1fr}.nav-btn{padding:0 9px;font-size:11px}}
+
+  /* ── Typography ── */
+  .heading{font-family:'Playfair Display',serif;color:var(--gold);font-size:19px;margin-bottom:14px}
+  .subheading{font-size:10px;color:var(--text3);letter-spacing:3px;text-transform:uppercase;margin-bottom:6px;font-family:'DM Mono',monospace}
+  .label{font-size:11px;color:var(--text3);letter-spacing:.5px;margin-bottom:3px;font-family:'DM Mono',monospace}
+
+  /* ── Buttons ── */
+  .btn{padding:7px 15px;border-radius:8px;border:none;cursor:pointer;font-family:'Noto Serif TC',serif;font-size:13px;transition:all .18s;font-weight:500}
+  .btn-gold{background:var(--gold);color:#fff}.btn-gold:hover{background:var(--gold2)}
+  .btn-ghost{background:#fff;border:1.5px solid var(--border2);color:var(--text2)}.btn-ghost:hover{border-color:var(--gold);color:var(--gold)}
+  .btn-danger{background:#fff;border:1.5px solid var(--red);color:var(--red)}.btn-danger:hover{background:#fef2f2}
+  .btn-sm{padding:4px 10px;font-size:12px;border-radius:6px}
+  .btn-copy{background:var(--gold-light);border:1.5px solid var(--gold-border);color:var(--gold);font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer;font-family:'Noto Serif TC',serif;transition:all .18s}.btn-copy:hover{background:var(--gold);color:#fff}
+
+  /* ── Inputs ── */
+  .input{background:#fff;border:1.5px solid var(--border);border-radius:8px;color:var(--text);padding:8px 11px;font-size:13px;font-family:'Noto Serif TC',serif;width:100%;transition:border .18s;outline:none;}
+  .input:focus{border-color:var(--gold)}
+  textarea.input{resize:vertical;min-height:70px}
+  select.input option{background:#fff}
+
+  /* ── Tags ── */
+  .tag{display:inline-block;padding:2px 7px;border-radius:4px;font-size:11px;background:var(--bg3);border:1px solid var(--border);color:var(--text2);margin:2px;font-family:'DM Mono',monospace}
+  .tag-gold{background:var(--gold-light);border-color:var(--gold-border);color:var(--gold)}
+  .tag-blue{background:#eff6ff;border-color:#bfdbfe;color:var(--blue)}
+
+  /* ── Stat cards ── */
+  .stat-card{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+  .stat-card::after{content:'';position:absolute;bottom:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--gold),var(--gold-border),transparent)}
+  .stat-num{font-family:'Playfair Display',serif;font-size:28px;color:var(--gold);line-height:1}
+  .stat-label{font-size:10px;color:var(--text3);letter-spacing:2px;margin-top:5px;font-family:'DM Mono',monospace}
+  .stat-sub{font-size:11px;color:var(--text2);margin-top:5px}
+  .progress-bar{height:4px;background:var(--bg3);border-radius:2px;margin-top:8px;overflow:hidden}
+  .progress-fill{height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-border));border-radius:2px;transition:width .6s ease}
+
+  /* ── Partner cards ── */
+  .partner-card{background:#fff;border:1.5px solid var(--border);border-radius:var(--radius);padding:16px;transition:all .18s;cursor:pointer}
+  .partner-card:hover{border-color:var(--gold-border);box-shadow:0 4px 16px rgba(184,134,11,.12)}
+  .avatar{width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,var(--gold-light),#fff);display:flex;align-items:center;justify-content:center;font-family:'Playfair Display',serif;font-size:17px;color:var(--gold);border:2px solid var(--gold-border);flex-shrink:0}
+  .avatar-lg{width:62px;height:62px;font-size:23px}
+  .role-badge{display:inline-block;padding:2px 7px;border-radius:5px;font-size:10px;font-family:'DM Mono',monospace;letter-spacing:.5px}
+  .role-夥伴{background:#eff6ff;border:1px solid #bfdbfe;color:var(--blue)}
+
+  /* ── Timeline ── */
+  .timeline-item{display:flex;gap:12px;padding:11px 10px;cursor:pointer;transition:background .15s;border-radius:9px;border-bottom:1px solid var(--border)}
+  .timeline-item:last-child{border-bottom:none}
+  .timeline-item:hover{background:var(--bg3)}
+  .tl-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;margin-top:5px}
+  .type-暖身{color:var(--blue)}.type-追蹤{color:var(--gold)}.type-規劃{color:var(--green)}.type-上線會議{color:var(--purple)}
+  .tl-dot.type-暖身{background:var(--blue)}.tl-dot.type-追蹤{background:var(--gold)}.tl-dot.type-規劃{background:var(--green)}.tl-dot.type-上線會議{background:var(--purple)}
+  .status-badge{font-size:10px;padding:2px 6px;border-radius:4px;font-family:'DM Mono',monospace}
+  .status-已完成{background:#d1fae5;color:#065f46}.status-待執行{background:var(--gold-light);color:var(--gold)}
+
+  /* ── Quotes ── */
+  .quote-card{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:22px 20px;position:relative;box-shadow:var(--shadow)}
+  .quote-card::before{content:'"';font-family:'Playfair Display',serif;font-size:64px;color:var(--gold-border);position:absolute;top:-6px;left:13px;opacity:.5;line-height:1}
+  .quote-text{font-size:14px;line-height:1.9;color:var(--text);padding-top:12px}
+  .quote-author{font-size:11px;color:var(--gold);margin-top:8px;font-family:'DM Mono',monospace}
+
+  /* ── Modal ── */
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);backdrop-filter:blur(3px);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px}
+  .modal{background:#fff;border:1.5px solid var(--border2);border-radius:16px;width:100%;max-width:540px;max-height:90vh;overflow-y:auto;padding:24px;box-shadow:0 8px 40px rgba(0,0,0,.14)}
+  .modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+  .close-btn{background:none;border:none;color:var(--text3);cursor:pointer;font-size:18px;padding:4px;border-radius:4px}.close-btn:hover{background:var(--bg3)}
+
+  /* ── Forms ── */
+  .form-group{margin-bottom:13px}
+  .form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+  /* ── Manifest ── */
+  .manifest-banner{background:linear-gradient(135deg,var(--gold-light),#fffbeb);border:1.5px solid var(--gold-border);border-radius:var(--radius);padding:20px 22px;margin-bottom:20px;box-shadow:0 2px 8px rgba(184,134,11,.1)}
+
+  /* ── Calendar ── */
+  .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+  .cal-cell{min-height:80px;background:#fff;border:1px solid var(--border);border-radius:6px;padding:5px;overflow:hidden}
+  .cal-cell.today{border-color:var(--gold);border-width:2px}
+  .cal-cell.other-month{background:var(--bg3);opacity:.5}
+  .cal-event{font-size:9.5px;line-height:1.35;padding:2px 4px;border-radius:3px;margin-top:2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer}
+  .cal-event.type-暖身{background:#eff6ff;color:var(--blue)}
+  .cal-event.type-追蹤{background:var(--gold-light);color:var(--gold)}
+  .cal-event.type-規劃{background:#f0fdf4;color:var(--green)}
+  .cal-event.type-上線會議{background:#f5f3ff;color:var(--purple)}
+
+  /* ── Partner detail tabs ── */
+  .detail-tab{background:none;border:none;cursor:pointer;padding:8px 14px;font-family:'Noto Serif TC',serif;font-size:13px;color:var(--text2);border-bottom:2px solid transparent;transition:all .18s}
+  .detail-tab.active{color:var(--gold);border-bottom-color:var(--gold);font-weight:700}
+
+  /* ── ABC Note ── */
+  .abc-note{font-family:'DM Mono',monospace;font-size:12px;line-height:1.9;white-space:pre-wrap;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:14px;color:var(--text)}
+
+  /* ── Misc ── */
+  .flex{display:flex}.items-center{align-items:center}.justify-between{justify-content:space-between}
+  .gap-6{gap:6px}.gap-8{gap:8px}.gap-12{gap:12px}
+  .mt-6{margin-top:6px}.mt-8{margin-top:8px}.mt-10{margin-top:10px}.mt-12{margin-top:12px}.mt-16{margin-top:16px}.mt-20{margin-top:20px}
+  .mb-8{margin-bottom:8px}.mb-12{margin-bottom:12px}.mb-16{margin-bottom:16px}
+  .text-gold{color:var(--gold)}.text-muted{color:var(--text2)}.text-sm{font-size:13px}.text-xs{font-size:11px}
+  .mono{font-family:'DM Mono',monospace}
+  .divider{height:1px;background:var(--border);margin:14px 0}
+  .empty{text-align:center;color:var(--text3);padding:32px 0;font-size:13px}
+`;
+
+// ─── Theme constants ──────────────────────────────────────────────
+const var_gold = "#b8860b";
+
+// ─── App ──────────────────────────────────────────────────────────
+export default function App() {
+  const [tab, setTab] = useState("dashboard");
+  const [partners, setPartners] = useState([]);
+  const [interactions, setInteractions] = useState([]);
+  const [todos, setTodos] = useState([]);
+  const [quotes, setQuotes] = useState([]);
+  const [goals, setGoals] = useState(SEED_GOALS);
+  const [playbook, setPlaybook] = useState([]);
+  const [manifest, setManifest] = useState(SEED_MANIFEST);
+  const [incomes, setIncomes] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const loadedPartners = (await load(KEYS.partners)) || SEED_PARTNERS;
+      // 兼容：舊資料可能把「夥伴」當作身分/狀態，這版把它視為「已加入」移除重疊
+      setPartners(loadedPartners.map(p => ({ ...p, role: p.role === "夥伴" ? "已加入" : p.role })));
+      const rawIx = (await load(KEYS.interactions)) || SEED_INTERACTIONS;
+      const migratedIx = rawIx.map(i => (i.type === "討論" ? { ...i, type: "暖身" } : i));
+      setInteractions(migratedIx);
+      if (rawIx.some(i => i.type === "討論")) save(KEYS.interactions, migratedIx);
+      setTodos((await load(KEYS.todos)) || SEED_TODOS);
+      setQuotes((await load(KEYS.quotes)) || SEED_QUOTES);
+      setGoals((await load(KEYS.goals)) || SEED_GOALS);
+      setPlaybook((await load(KEYS.playbook)) || SEED_PLAYBOOK);
+      setManifest((await load(KEYS.manifest)) || SEED_MANIFEST);
+      setIncomes((await load(KEYS.incomes)) || []);
+      setLoaded(true);
+    })();
+  }, []);
+
+  const persist = useCallback((key, val, setter) => { setter(val); save(key, val); }, []);
+
+  if (!loaded) return <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100vh", color:var_gold, fontFamily:"'Playfair Display',serif", fontSize:20 }}><style>{css}</style>載入中…</div>;
+
+  const TABS = [
+    { id: "dashboard", label: "📊 總覽" },
+    { id: "partners",  label: "👥 人脈" },
+    { id: "timeline",  label: "🗓 時間軸" },
+    { id: "playbook",  label: "📖 教學" },
+    { id: "coach",     label: "🤖 AI教練" },
+    { id: "quotes",    label: "✨ 金句" },
+  ];
+
+  return (
+    <>
+      <style>{css}</style>
+      <div className="app">
+        <header className="header">
+          <div className="logo"><div className="logo-dot"/>Network CRM</div>
+          <nav className="nav">
+            {TABS.map(t => <button key={t.id} className={`nav-btn${tab===t.id?" active":""}`} onClick={() => setTab(t.id)}>{t.label}</button>)}
+          </nav>
+        </header>
+        <main className="main">
+          {tab==="dashboard" && <Dashboard partners={partners} interactions={interactions} setInteractions={i=>persist(KEYS.interactions,i,setInteractions)} todos={todos} goals={goals} setGoals={g=>persist(KEYS.goals,g,setGoals)} setTodos={t=>persist(KEYS.todos,t,setTodos)} manifest={manifest} setManifest={m=>persist(KEYS.manifest,m,setManifest)} incomes={incomes} persistIncomes={v=>persist(KEYS.incomes,v,setIncomes)}/>}
+          {tab==="partners"  && <Partners
+            partners={partners}
+            setPartners={p=>persist(KEYS.partners,p,setPartners)}
+            interactions={interactions}
+            setInteractions={i=>persist(KEYS.interactions,i,setInteractions)}
+            rawSave={p=>save(KEYS.partners,p)}
+          />}
+          {tab==="timeline"  && <Timeline  interactions={interactions} setInteractions={i=>persist(KEYS.interactions,i,setInteractions)} partners={partners}/>}
+          {tab==="playbook"  && <Playbook  playbook={playbook} setPlaybook={pb=>persist(KEYS.playbook,pb,setPlaybook)}/>}
+          {tab==="coach"     && <AICoach   partners={partners} interactions={interactions} todos={todos}/>}
+          {tab==="quotes"    && <QuotesTab quotes={quotes} setQuotes={q=>persist(KEYS.quotes,q,setQuotes)}/>}
+        </main>
+      </div>
+    </>
+  );
+}
+
+// ─── Dashboard ────────────────────────────────────────────────────
+function Dashboard({ partners, interactions, setInteractions, goals, setGoals, manifest, setManifest, incomes, persistIncomes }) {
+  const [editGoals, setEditGoals] = useState(false);
+  const [editManifest, setEditManifest] = useState(false);
+  const [gd, setGd] = useState(goals);
+  const [md, setMd] = useState(manifest);
+  const [newCond, setNewCond] = useState("");
+  const [showAddIncome, setShowAddIncome] = useState(false);
+  const [incomeDraft, setIncomeDraft] = useState({ date: new Date().toISOString().slice(0,10), amount: "", note: "" });
+
+  const saveIncomes = (next) => {
+    persistIncomes(next);
+  };
+
+  const recruitStats = ["未加入","暖身中","確定談場","跟進中","拒絕","已加入"].map(r=>({ role:r, count:partners.filter(p=>p.role===r).length }));
+  const rcol = { 未加入:"#aaa", 暖身中:"#2563eb", 確定談場:"#b8860b", 跟進中:"#7c3aed", 拒絕:"#c0392b", 已加入:"#27ae60" };
+
+  const totalIncome = incomes.reduce((s,i)=>s+i.amount,0);
+  const totalCost = partners.reduce((s,p)=>s+(p.costs||[]).reduce((a,c)=>a+c.amount,0),0);
+  const pct = (v,m) => Math.min(100, Math.round((v/(m||1))*100));
+
+  // Pending items from time axis (interactions with status 待執行)
+  const pendingInteractions = interactions.filter(i=>i.status==="待執行").sort((a,b)=>a.date.localeCompare(b.date));
+  const toggleInteraction = (id) => setInteractions(interactions.map(i=>i.id===id?{...i,status:"已完成"}:i));
+
+  const addIncome = () => {
+    if (!incomeDraft.amount) return;
+    saveIncomes([...incomes, { id: uid(), ...incomeDraft, amount: +incomeDraft.amount }]);
+    setIncomeDraft({ date: new Date().toISOString().slice(0,10), amount: "", note: "" });
+    setShowAddIncome(false);
+  };
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:18}}>
+
+      {/* ① 目標宣言 & 顯化條件 */}
+      <div className="manifest-banner">
+        <div className="subheading">✦ 目標宣言 & 顯化條件</div>
+        <div style={{fontSize:15,fontFamily:"'Playfair Display',serif",color:var_gold,lineHeight:1.9,marginTop:6}}>{manifest.declaration}</div>
+        <div className="flex" style={{flexWrap:"wrap",gap:6,marginTop:10}}>
+          {manifest.conditions.map((c,i)=><span key={i} className="tag tag-gold">✓ {c}</span>)}
+        </div>
+        <button className="btn btn-ghost btn-sm" style={{marginTop:12}} onClick={()=>{setMd(manifest);setEditManifest(true);}}>✏️ 編輯</button>
+      </div>
+
+      {/* ② 我的收入 & 支出 */}
+      <div className="card">
+        <div className="flex justify-between items-center mb-14">
+          <div className="subheading" style={{margin:0}}>💰 我的收入 & 支出</div>
+          <button className="btn btn-ghost btn-sm" onClick={()=>{setGd(goals);setEditGoals(true);}}>⚙ 設定目標</button>
+        </div>
+
+        {/* 收入 & 支出 並排 */}
+        <div className="grid-2" style={{gap:12,marginBottom:16}}>
+          {/* 收入欄 */}
+          <div style={{background:"var(--gold-light)",border:"1.5px solid var(--gold-border)",borderRadius:10,padding:"14px 16px"}}>
+            <div className="flex justify-between items-center mb-10">
+              <div>
+                <div className="stat-label" style={{marginBottom:4}}>💰 累積收入</div>
+                <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:var_gold}}>NT${totalIncome.toLocaleString()}</div>
+                <div style={{fontSize:11,color:"var(--text2)",marginTop:3}}>目標 NT${(goals.monthlyIncome||0).toLocaleString()}</div>
+                <div className="progress-bar"><div className="progress-fill" style={{width:`${pct(totalIncome,goals.monthlyIncome||1)}%`}}/></div>
+              </div>
+              <button className="btn btn-ghost btn-sm" style={{flexShrink:0}} onClick={()=>setShowAddIncome(true)}>＋</button>
+            </div>
+            {incomes.length===0&&<div style={{fontSize:11,color:"var(--text3)"}}>尚無收入紀錄</div>}
+            {[...incomes].sort((a,b)=>b.date.localeCompare(a.date)).map(i=>(
+              <div key={i.id} className="flex items-center justify-between" style={{padding:"5px 0",borderTop:"1px solid var(--gold-border)"}}>
+                <div><div className="text-sm">{i.note||"收入"}</div><div className="text-xs mono" style={{color:var_gold,opacity:.7}}>{i.date}</div></div>
+                <div className="flex items-center gap-8">
+                  <span className="mono" style={{color:"var(--green)",fontSize:12}}>+NT${i.amount.toLocaleString()}</span>
+                  <button style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:11}} onClick={()=>saveIncomes(incomes.filter(x=>x.id!==i.id))}>✕</button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* 支出欄 */}
+          <div style={{background:"#fff5f5",border:"1.5px solid #fca5a5",borderRadius:10,padding:"14px 16px"}}>
+            <div className="stat-label" style={{marginBottom:4}}>💸 已投入成本</div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"var(--red)",marginBottom:10}}>NT${totalCost.toLocaleString()}</div>
+            {(() => {
+              const allCosts = partners.flatMap(p=>(p.costs||[]).map(c=>({...c}))).sort((a,b)=>b.date.localeCompare(a.date));
+              if(allCosts.length===0) return <div style={{fontSize:11,color:"var(--text3)"}}>尚無支出紀錄</div>;
+              return allCosts.map(c=>(
+                <div key={c.id} className="flex justify-between items-center" style={{padding:"5px 0",borderTop:"1px solid #fecdd3"}}>
+                  <div className="flex items-center gap-5">
+                    <span style={{fontSize:9,padding:"1px 4px",borderRadius:3,border:`1px solid ${TYPE_COLOR[c.type]||"#ccc"}`,color:TYPE_COLOR[c.type]||"#888",fontFamily:"'DM Mono',monospace"}}>{c.type}</span>
+                    <div>
+                      <div style={{fontSize:11,color:"var(--text2)"}}>{c.note||"支出"}</div>
+                      <div style={{fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{c.date}</div>
+                    </div>
+                  </div>
+                  <span className="mono" style={{fontSize:12,color:"var(--red)"}}>NT${c.amount.toLocaleString()}</span>
+                </div>
+              ));
+            })()}
+          </div>
+        </div>
+      </div>
+
+      {/* ③ 招募漏斗 — 一排，文字在上數字在下，不換行 */}
+      <div className="card" style={{padding:"14px 18px"}}>
+        <div className="subheading mb-10">🎯 招募漏斗</div>
+        <div style={{display:"flex",gap:8,overflowX:"auto"}}>
+          {recruitStats.map(s=>(
+            <div key={s.role} style={{
+              display:"flex",flexDirection:"column",alignItems:"center",gap:4,
+              background:rcol[s.role]+"14",border:`1.5px solid ${rcol[s.role]}44`,
+              borderRadius:8,padding:"10px 14px",flex:"1 1 0",minWidth:72,
+            }}>
+              <span style={{fontSize:10,color:rcol[s.role],fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>{s.role}</span>
+              <span style={{fontFamily:"'Playfair Display',serif",fontSize:26,color:rcol[s.role],lineHeight:1,fontWeight:700}}>{s.count}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ④ 待執行清單（來自時間軸） */}
+      <div className="card">
+        <div className="flex justify-between items-center mb-12">
+          <div className="subheading" style={{margin:0}}>📋 待執行清單
+            <span style={{marginLeft:8,fontFamily:"'DM Mono',monospace",fontSize:10,color:"var(--text3)"}}>（來自時間軸）</span>
+          </div>
+          <span style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{pendingInteractions.length} 項</span>
+        </div>
+        {pendingInteractions.length===0&&<div className="empty" style={{padding:"10px 0"}}>🎉 全部完成！</div>}
+        {pendingInteractions.map(item=>{
+          const p = partners.find(x=>x.id===item.partnerId);
+          return (
+            <div key={item.id} className="flex items-center gap-10" style={{padding:"8px 0",borderBottom:"1px solid var(--border)"}}>
+              <input
+                type="checkbox"
+                style={{accentColor:var_gold,cursor:"pointer",width:16,height:16,flexShrink:0}}
+                onChange={()=>toggleInteraction(item.id)}
+              />
+              <div style={{flex:1,minWidth:0}}>
+                <div className="text-sm" style={{fontWeight:500}}>{item.title}</div>
+                <div style={{display:"flex",gap:6,marginTop:2,flexWrap:"wrap"}}>
+                  <span className="text-xs mono text-muted">{item.date}</span>
+                  {p&&<span className="text-xs text-muted">· {p.name}</span>}
+                  <span className="tag" style={{padding:"0 5px",fontSize:10}}>{item.type}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ⑤ 各夥伴投入金費 */}
+      <div className="card">
+        <div className="subheading mb-12">💸 各夥伴投入金費</div>
+        {partners.filter(p=>(p.costs||[]).length>0).length===0&&<div className="empty" style={{padding:"8px 0"}}>尚無成本紀錄</div>}
+        {partners.filter(p=>(p.costs||[]).length>0).map(p=>{
+          const total=(p.costs||[]).reduce((a,c)=>a+c.amount,0);
+          return (
+            <div key={p.id} className="mt-10">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-8">
+                  <div className="avatar" style={{width:26,height:26,fontSize:11}}>{p.avatar||p.name[0]}</div>
+                  <span className="text-sm" style={{fontWeight:600}}>{p.name}</span>
+                </div>
+                <span className="mono" style={{color:"var(--red)",fontSize:13}}>NT${total.toLocaleString()}</span>
+              </div>
+              {(p.costs||[]).map(c=>(
+                <div key={c.id} className="flex justify-between items-center mt-5" style={{paddingLeft:34}}>
+                  <div className="flex items-center gap-6">
+                    <span style={{fontSize:9,padding:"1px 5px",borderRadius:3,border:`1px solid ${TYPE_COLOR[c.type]||"#ccc"}`,color:TYPE_COLOR[c.type]||"#888",fontFamily:"'DM Mono',monospace"}}>{c.type}</span>
+                    <span className="text-xs mono text-muted">{c.date}</span>
+                    {c.note&&<span className="text-xs text-muted">· {c.note}</span>}
+                  </div>
+                  <span className="mono" style={{fontSize:11,color:"var(--text2)"}}>NT${c.amount.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Modals */}
+      {editGoals&&(
+        <Modal title="設定目標" onClose={()=>setEditGoals(false)}>
+          {[["monthlyIncome","月收入目標 (NT$)"],["monthlyPartners","夥伴人數目標"]].map(([k,l])=>(
+            <div className="form-group" key={k}><label className="label">{l}</label><input type="number" className="input" value={gd[k]||""} onChange={e=>setGd({...gd,[k]:+e.target.value})}/></div>
+          ))}
+          <div className="flex gap-8 mt-12"><button className="btn btn-gold" onClick={()=>{setGoals(gd);setEditGoals(false);}}>儲存</button><button className="btn btn-ghost" onClick={()=>setEditGoals(false)}>取消</button></div>
+        </Modal>
+      )}
+      {editManifest&&(
+        <Modal title="目標宣言 & 顯化條件" onClose={()=>setEditManifest(false)}>
+          <div className="form-group"><label className="label">目標宣言（一句話）</label><textarea className="input" style={{minHeight:72}} value={md.declaration} onChange={e=>setMd({...md,declaration:e.target.value})}/></div>
+          <div className="subheading mt-12">顯化條件</div>
+          {md.conditions.map((c,i)=>(
+            <div key={i} className="flex items-center gap-8 mt-6">
+              <input className="input" style={{flex:1}} value={c} onChange={e=>setMd({...md,conditions:md.conditions.map((x,j)=>j===i?e.target.value:x)})}/>
+              <button className="btn btn-danger btn-sm" onClick={()=>setMd({...md,conditions:md.conditions.filter((_,j)=>j!==i)})}>✕</button>
+            </div>
+          ))}
+          <div className="flex gap-8 mt-8">
+            <input className="input" style={{flex:1}} placeholder="新增條件…" value={newCond} onChange={e=>setNewCond(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&newCond.trim()){setMd({...md,conditions:[...md.conditions,newCond.trim()]});setNewCond("");}}}/>
+            <button className="btn btn-ghost btn-sm" onClick={()=>{if(newCond.trim()){setMd({...md,conditions:[...md.conditions,newCond.trim()]});setNewCond("");}}}>＋</button>
+          </div>
+          <div className="flex gap-8 mt-14"><button className="btn btn-gold" onClick={()=>{setManifest(md);setEditManifest(false);}}>儲存</button><button className="btn btn-ghost" onClick={()=>setEditManifest(false)}>取消</button></div>
+        </Modal>
+      )}
+      {showAddIncome&&(
+        <Modal title="新增收入紀錄" onClose={()=>setShowAddIncome(false)}>
+          <div className="form-row">
+            <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={incomeDraft.date} onChange={e=>setIncomeDraft({...incomeDraft,date:e.target.value})}/></div>
+            <div className="form-group"><label className="label">金額 (NT$)</label><input type="number" className="input" value={incomeDraft.amount} onChange={e=>setIncomeDraft({...incomeDraft,amount:e.target.value})}/></div>
+          </div>
+          <div className="form-group"><label className="label">備注</label><input className="input" value={incomeDraft.note} onChange={e=>setIncomeDraft({...incomeDraft,note:e.target.value})} placeholder="三月獎金、業績分潤…"/></div>
+          <div className="flex gap-8 mt-12"><button className="btn btn-gold" onClick={addIncome}>新增</button><button className="btn btn-ghost" onClick={()=>setShowAddIncome(false)}>取消</button></div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── Partners ─────────────────────────────────────────────────────
+function Partners({ partners, setPartners, interactions, setInteractions, rawSave }) {
+  const [selected, setSelected] = useState(null);
+  const [detailTab, setDetailTab] = useState("info");
+  const [showForm, setShowForm] = useState(false);
+  const [editData, setEditData] = useState(null);
+  const [filter, setFilter] = useState("全部");
+  const [copied, setCopied] = useState(false);
+
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState("");
+
+  const [showInteractionForm, setShowInteractionForm] = useState(false);
+  const [interactionDraft, setInteractionDraft] = useState(null);
+  const [interactionEditMode, setInteractionEditMode] = useState("new"); // new | edit
+
+  const nonUplines = partners.filter(p=>p.role!=="上線");
+  const filterGroups = ["全部",...RECRUIT_ROLES];
+  const filtered = filter==="全部" ? nonUplines : nonUplines.filter(p=>p.role===filter);
+
+  const resizeImageToAvatarDataUrl = async (file, { maxDim=256, quality=0.78 } = {}) => {
+    const readAsDataUrl = (f) => new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = reject;
+      fr.readAsDataURL(f);
+    });
+
+    const dataUrl = await readAsDataUrl(file);
+    const img = await new Promise((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => resolve(im);
+      im.onerror = reject;
+      im.src = dataUrl;
+    });
+
+    const w = img.naturalWidth || img.width || 1;
+    const h = img.naturalHeight || img.height || 1;
+    const scale = Math.min(1, maxDim / Math.max(w, h));
+    const cw = Math.max(1, Math.round(w * scale));
+    const ch = Math.max(1, Math.round(h * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = cw;
+    canvas.height = ch;
+    const ctx = canvas.getContext("2d");
+    ctx?.drawImage(img, 0, 0, cw, ch);
+    // 圓形頭像，用 JPEG 壓縮可大幅降低體積
+    return canvas.toDataURL("image/jpeg", quality);
+  };
+
+  const onPickPartnerPhoto = async (file) => {
+    if (!file) return;
+    setPhotoError("");
+    const MAX_BYTES = 8 * 1024 * 1024; // 上限給「合理」處理，實際輸出會再壓縮
+    if (file.size > MAX_BYTES) {
+      setPhotoError("照片檔案太大，請選擇較小的圖片（建議 < 8MB）。");
+      return;
+    }
+    setPhotoBusy(true);
+    try {
+      const dataUrl = await resizeImageToAvatarDataUrl(file);
+      setEditData((prev) => (prev ? { ...prev, photo: dataUrl } : prev));
+    } catch {
+      setPhotoError("照片處理失敗，請再試一次。");
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const openNew = () => { setEditData({id:uid(),name:"",role:"暖身中",avatar:"",photo:"",phone:"",ig:"",birthday:"",tags:"",notes:"",costs:[],abcNote:ABC_TEMPLATE,joined:new Date().toISOString().slice(0,10)}); setShowForm(true); };
+  const openEdit = (p) => {
+    const nextRole = p.role === "夥伴" ? "已加入" : p.role;
+    setEditData({
+      ...p,
+      role: nextRole,
+      tags: Array.isArray(p.tags) ? p.tags.join("、") : (p.tags || ""),
+      abcNote: p.abcNote || "",
+    });
+    setShowForm(true);
+  };
+  const saveP = () => {
+    const entry={...editData,tags:editData.tags?editData.tags.split(/[、,，]/).map(t=>t.trim()).filter(Boolean):[],avatar:editData.avatar||editData.name[0]||"?",photo:editData.photo||""};
+    const next=partners.find(p=>p.id===entry.id)?partners.map(p=>p.id===entry.id?entry:p):[...partners,entry];
+    setPartners(next); setShowForm(false);
+  };
+  const del = (id) => { const next=partners.filter(p=>p.id!==id); setPartners(next); setSelected(null); };
+  const updateCosts = (updated) => {
+    const next=partners.map(p=>p.id===updated.id?updated:p);
+    setPartners(next); setSelected(updated); rawSave(next);
+  };
+  const updateAbcNote = (txt) => {
+    const updated={...selected,abcNote:txt};
+    const next=partners.map(p=>p.id===updated.id?updated:p);
+    setPartners(next); setSelected(updated); rawSave(next);
+  };
+  const partnerInteractions = selected
+    ? interactions
+        .filter(i => i.partnerId === selected.id)
+        .sort((a, b) => {
+          const todayMs = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00").getTime();
+          const toMs = (s) => new Date(s + "T00:00:00").getTime();
+          const da = Math.abs(toMs(a.date) - todayMs);
+          const db = Math.abs(toMs(b.date) - todayMs);
+          if (da !== db) return da - db; // 越接近今天越靠前
+          return b.date.localeCompare(a.date); // 同距離再用較新的
+        })
+    : [];
+
+  const normalizeTags = (t) => (t ? String(t).split(/[、,，]/).map(x=>x.trim()).filter(Boolean) : []);
+
+  const openInteractionNew = () => {
+    if (!selected) return;
+    setInteractionEditMode("new");
+    setInteractionDraft({
+      id: uid(),
+      date: new Date().toISOString().slice(0,10),
+      partnerId: selected.id,
+      type: "暖身",
+      title: "",
+      content: "",
+      status: "待執行",
+      tags: "",
+      partnerPlan: "",
+      actionItems: "",
+      quote: "",
+    });
+    setShowInteractionForm(true);
+  };
+
+  const openInteractionEdit = (it) => {
+    setInteractionEditMode("edit");
+    setInteractionDraft({
+      ...it,
+      partnerId: selected?.id || it.partnerId,
+      tags: Array.isArray(it.tags) ? it.tags.join("、") : (it.tags || ""),
+      partnerPlan: it.type === "上線會議" ? mergeMeetingPlanFields(it.partnerPlan, it.actionItems) : (it.partnerPlan || ""),
+      actionItems: it.type === "上線會議" ? "" : (it.actionItems || ""),
+      quote: it.quote || "",
+    });
+    setShowInteractionForm(true);
+  };
+
+  const deleteInteraction = (id) => {
+    if (!selected) return;
+    const target = interactions.find(i=>i.id===id);
+    let next = interactions.filter(i=>i.id!==id);
+    // 若刪除上線會議，連帶刪除它自動產生的 規劃 行動項目（避免殘留）
+    if (target?.type === "上線會議") {
+      const prefix = `來自上線會議「${target.title}」的行動項目`;
+      next = next.filter(i => !(i.type === "規劃" && i.partnerId === selected.id && i.content === prefix));
+      next = removeInteractionsSyncedFromMeeting(next, id);
+    }
+    setInteractions(next);
+    setShowInteractionForm(false);
+  };
+
+  const saveInteraction = () => {
+    if (!selected || !interactionDraft) return;
+    const tagsArr = normalizeTags(interactionDraft.tags);
+    const entry = { ...interactionDraft, tags: tagsArr, partnerId: selected.id };
+    if (entry.type === "上線會議") entry.actionItems = "";
+
+    // 新增/編輯互動主紀錄
+    const hasId = interactions.some(i=>i.id===entry.id);
+    let next = hasId ? interactions.map(i=>i.id===entry.id?entry:i) : [...interactions, entry];
+
+    if (entry.type === "上線會議") {
+      next = removeInteractionsSyncedFromMeeting(next, entry.id);
+      next = [...next, ...buildPartnerPlanSyncEntries(entry, partners)];
+    }
+
+    // 上線會議：同一欄位內「一行一項」新增時自動拆成待執行規劃（寫在 partnerPlan）
+    if (interactionEditMode === "new" && entry.type === "上線會議") {
+      const lines = meetingPlanLinesForActions(entry.partnerPlan);
+      if (lines.length) {
+        const prefix = `來自上線會議「${entry.title}」的行動項目`;
+        const newItems = lines.map(l => ({
+          id: uid(),
+          date: entry.date,
+          partnerId: selected.id,
+          type: "規劃",
+          title: l,
+          content: prefix,
+          status: "待執行",
+          tags: ["上線會議"],
+          partnerPlan: "",
+          actionItems: "",
+          quote: "",
+        }));
+        next = [...next, ...newItems];
+      }
+    }
+
+    setInteractions(next);
+    setShowInteractionForm(false);
+  };
+
+  const roleBadge = (role) => {
+    if(role==="夥伴") role="已加入"; // 兼容舊資料
+    const col=RECRUIT_COLOR[role]||"#aaa";
+    return <span style={{display:"inline-block",padding:"2px 7px",borderRadius:5,fontSize:10,fontFamily:"'DM Mono',monospace",background:col+"18",border:`1px solid ${col}55`,color:col}}>{role}</span>;
+  };
+
+  const copyAbc = () => {
+    navigator.clipboard.writeText(selected?.abcNote||"").then(()=>{ setCopied(true); setTimeout(()=>setCopied(false),2000); });
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-16">
+        <h2 className="heading" style={{margin:0}}>人脈網絡 <span className="text-muted mono" style={{fontSize:12}}>({nonUplines.length})</span></h2>
+        <button className="btn btn-gold btn-sm" onClick={openNew}>＋ 新增</button>
+      </div>
+      <div className="flex gap-8 mb-14" style={{flexWrap:"wrap"}}>
+        {filterGroups.map(r=><button key={r} className={`btn btn-sm ${filter===r?"btn-gold":"btn-ghost"}`} onClick={()=>setFilter(r)}>{r}</button>)}
+      </div>
+      <div className="grid-3">
+        {filtered.map(p=>(
+          <div key={p.id} className="partner-card" onClick={()=>{setSelected(p);setDetailTab("info");}}>
+            <div className="flex items-center gap-10 mb-8">
+              <div className="avatar" style={p.photo ? {overflow:"hidden"} : undefined}>
+                {p.photo ? <img src={p.photo} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/> : (p.avatar||p.name[0])}
+              </div>
+              <div>
+                <div style={{fontWeight:700,fontSize:14}}>{p.name}</div>
+                <div style={{marginTop:4}}>{roleBadge(p.role)}</div>
+              </div>
+            </div>
+            {p.tags?.length>0&&<div className="mb-6">{(Array.isArray(p.tags)?p.tags:p.tags.split("、")).map(t=><span key={t} className="tag">{t}</span>)}</div>}
+            {p.ig&&<div className="text-xs text-muted mono mb-4">{p.ig}</div>}
+            {(p.costs||[]).length>0&&<div className="mono mt-4" style={{fontSize:11,color:"var(--red)"}}>投入 NT${(p.costs||[]).reduce((a,c)=>a+c.amount,0).toLocaleString()}</div>}
+            {p.abcNote&&p.abcNote!==ABC_TEMPLATE&&<div className="tag tag-gold" style={{marginTop:6,display:"inline-block"}}>📋 已有ABC單</div>}
+            <div className="flex gap-6 mt-10" onClick={e=>e.stopPropagation()}>
+              <button className="btn btn-ghost btn-sm" onClick={()=>openEdit(p)}>✏️ 編輯</button>
+              <button className="btn btn-danger btn-sm" onClick={()=>del(p.id)}>刪除</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Detail modal */}
+      {selected&&(
+        <Modal title="" onClose={()=>setSelected(null)} wide>
+          <div className="flex items-center gap-12 mb-14">
+            <div className="avatar avatar-lg" style={selected.photo ? {overflow:"hidden"} : undefined}>
+              {selected.photo ? <img src={selected.photo} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/> : (selected.avatar||selected.name[0])}
+            </div>
+            <div>
+              <h3 style={{fontFamily:"'Playfair Display',serif",fontSize:20,color:var_gold}}>{selected.name}</h3>
+              <div style={{marginTop:6}}>{roleBadge(selected.role)}</div>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex" style={{borderBottom:"1.5px solid var(--border)",marginBottom:16}}>
+            {[["info","📋 基本資料"],["abc","⭐ ABC單"],["cost","💸 金費"],["log","🗓 互動"]].map(([id,label])=>(
+              <button key={id} className={`detail-tab${detailTab===id?" active":""}`} onClick={()=>setDetailTab(id)}>{label}</button>
+            ))}
+          </div>
+
+          {/* Info tab */}
+          {detailTab==="info"&&(
+            <div>
+              <div className="grid-2 mb-10">
+                {[["📱 電話",selected.phone],["📸 IG",selected.ig],["🎂 生日",selected.birthday?fmt(selected.birthday):"—"],["📅 加入名單",selected.joined?fmt(selected.joined):"—"]].map(([l,v])=>(
+                  <div key={l}><div className="label">{l}</div><div className="text-sm">{v||"—"}</div></div>
+                ))}
+              </div>
+              {selected.tags?.length>0&&<div className="mb-10">{(Array.isArray(selected.tags)?selected.tags:[]).map(t=><span key={t} className="tag tag-gold">{t}</span>)}</div>}
+              {selected.notes&&<div className="card-sm"><div className="label">備注</div><div className="text-sm mt-6" style={{lineHeight:1.8}}>{selected.notes}</div></div>}
+              <div className="flex gap-8 mt-14">
+                <button className="btn btn-gold btn-sm" onClick={()=>{setSelected(null);openEdit(selected);}}>✏️ 編輯資料</button>
+                <button className="btn btn-danger btn-sm" onClick={()=>del(selected.id)}>刪除</button>
+              </div>
+            </div>
+          )}
+
+          {/* ABC tab */}
+          {detailTab==="abc"&&(
+            <div>
+              <div className="flex justify-between items-center mb-10">
+                <div>
+                  <div className="subheading" style={{margin:0}}>⭐ 澤澤稱奇 ABC單</div>
+                  <div className="text-xs text-muted mt-6">填寫完成後複製傳給上線（刪除括弧說明文字）</div>
+                </div>
+                <button className="btn-copy" onClick={copyAbc}>{copied?"✓ 已複製！":"📋 複製全文"}</button>
+              </div>
+              <textarea
+                className="input abc-note"
+                style={{minHeight:380,fontFamily:"'DM Mono',monospace",fontSize:12,lineHeight:1.9}}
+                value={selected.abcNote||ABC_TEMPLATE}
+                onChange={e=>updateAbcNote(e.target.value)}
+              />
+              <div className="text-xs text-muted mt-8">✦ 自動儲存 · 內容愈詳細成交率愈高</div>
+            </div>
+          )}
+
+          {/* Cost tab */}
+          {detailTab==="cost"&&<CostSection partner={selected} onUpdate={updateCosts}/>}
+
+          {/* Log tab */}
+          {detailTab==="log"&&(
+            <div>
+              <div className="flex items-center justify-between mb-8">
+                <div className="subheading" style={{margin:0}}>互動紀錄 ({partnerInteractions.length})</div>
+                <button className="btn btn-gold btn-sm" onClick={openInteractionNew}>＋ 新增互動</button>
+              </div>
+              {partnerInteractions.length===0&&<div className="empty" style={{padding:"12px 0"}}>尚無互動紀錄</div>}
+              {partnerInteractions.map(i=>(
+                <div key={i.id} className="flex gap-8 mt-10">
+                  <div className={`tl-dot type-${i.type}`} style={{marginTop:5}}/>
+                  <div style={{flex:1}}>
+                    <div className="flex items-center gap-6"><span className="text-sm" style={{fontWeight:600}}>{i.title}</span><span className={`status-badge status-${i.status}`}>{i.status}</span></div>
+                    <div className="text-xs mono text-muted mt-3">{i.date} · {i.type}</div>
+                    {i.content&&<div className="text-sm text-muted mt-4" style={{lineHeight:1.7}}>{i.content}</div>}
+                    {i.type==="上線會議"&&mergeMeetingPlanFields(i.partnerPlan,i.actionItems)&&(
+                      <div className="text-sm text-muted mt-4" style={{lineHeight:1.7,whiteSpace:"pre-wrap"}}><span className="label" style={{display:"block",marginBottom:4}}>具體規劃與待辦</span>{mergeMeetingPlanFields(i.partnerPlan,i.actionItems)}</div>
+                    )}
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:8,alignItems:"flex-end",flexShrink:0}}>
+                    <button className="btn btn-ghost btn-sm" onClick={()=>openInteractionEdit(i)}>✏️ 編輯</button>
+                    <button className="btn btn-danger btn-sm" onClick={()=>deleteInteraction(i.id)}>刪除</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {/* Interaction form (within partner detail -> (4)互動) */}
+      {selected && showInteractionForm && interactionDraft && (
+        <Modal title={interactionEditMode==="new"?"新增互動":"編輯互動"} onClose={()=>setShowInteractionForm(false)} wide>
+          <div className="form-row">
+            <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={interactionDraft.date} onChange={e=>setInteractionDraft({...interactionDraft,date:e.target.value})}/></div>
+            <div className="form-group"><label className="label">類型</label>
+              <select className="input" value={interactionDraft.type} onChange={e=>setInteractionDraft({...interactionDraft,type:e.target.value})}>
+                {["暖身","追蹤","規劃","上線會議"].map(t=><option key={t}>{t}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="form-group"><label className="label">標題 *</label><input className="input" value={interactionDraft.title} onChange={e=>setInteractionDraft({...interactionDraft,title:e.target.value})}/></div>
+          {interactionDraft.type !== "上線會議" ? (
+            <div className="form-group"><label className="label">內容</label><textarea className="input" style={{minHeight:80}} value={interactionDraft.content||""} onChange={e=>setInteractionDraft({...interactionDraft,content:e.target.value})}/></div>
+          ) : (
+            <>
+              <div className="form-group"><label className="label">討論主題 / 結論</label><textarea className="input" style={{minHeight:80}} value={interactionDraft.content||""} onChange={e=>setInteractionDraft({...interactionDraft,content:e.target.value})}/></div>
+              <div className="form-group"><label className="label">具體規劃與待辦（一行一項）</label><textarea className="input" style={{minHeight:120,fontFamily:"'DM Mono',monospace",fontSize:12}} value={interactionDraft.partnerPlan||""} onChange={e=>setInteractionDraft({...interactionDraft,partnerPlan:e.target.value})} placeholder={"王思涵：本週約談場\n幫陳威宇整理獎金說明"}/>
+                <div className="text-xs text-muted mt-6" style={{lineHeight:1.6}}>每行會自動成為一筆待執行規劃；若行內含人脈「姓名」（須與人脈網絡相同），儲存後也會同步到對方互動紀錄。在此夥伴下建立上線會議時，此夥伴已有主紀錄，不另產生子項目。</div>
+              </div>
+              <div className="form-group"><label className="label">上線金句 / 激勵話語</label><input className="input" value={interactionDraft.quote||""} onChange={e=>setInteractionDraft({...interactionDraft,quote:e.target.value})}/></div>
+            </>
+          )}
+          <div className="form-row">
+            <div className="form-group"><label className="label">狀態</label>
+              <select className="input" value={interactionDraft.status} onChange={e=>setInteractionDraft({...interactionDraft,status:e.target.value})}>
+                {["待執行","已完成"].map(s=><option key={s}>{s}</option>)}
+              </select>
+            </div>
+            <div className="form-group"><label className="label">標籤（逗號/頓號分隔）</label><input className="input" value={interactionDraft.tags} onChange={e=>setInteractionDraft({...interactionDraft,tags:e.target.value})}/></div>
+          </div>
+          <div className="flex gap-8 mt-12"><button className="btn btn-gold" onClick={saveInteraction}>儲存</button><button className="btn btn-ghost" onClick={()=>setShowInteractionForm(false)}>取消</button></div>
+        </Modal>
+      )}
+
+      {/* Edit form */}
+      {showForm&&editData&&(
+        <Modal title={partners.find(p=>p.id===editData.id)?"編輯夥伴":"新增夥伴"} onClose={()=>setShowForm(false)}>
+          <div className="form-row">
+            <div className="form-group"><label className="label">姓名 *</label><input className="input" value={editData.name} onChange={e=>setEditData({...editData,name:e.target.value})}/></div>
+            <div className="form-group"><label className="label">身份/狀態</label>
+              <select className="input" value={editData.role} onChange={e=>setEditData({...editData,role:e.target.value})}>
+                {NON_UPLINE_ROLES.map(r=><option key={r}>{r}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="form-row">
+            <div className="form-group"><label className="label">電話</label><input className="input" value={editData.phone} onChange={e=>setEditData({...editData,phone:e.target.value})}/></div>
+            <div className="form-group"><label className="label">IG 帳號</label><input className="input" value={editData.ig} onChange={e=>setEditData({...editData,ig:e.target.value})}/></div>
+          </div>
+          <div className="form-group"><label className="label">生日</label><input type="date" className="input" value={editData.birthday} onChange={e=>setEditData({...editData,birthday:e.target.value})}/></div>
+          <div className="form-group"><label className="label">標籤（逗號分隔）</label><input className="input" value={editData.tags} onChange={e=>setEditData({...editData,tags:e.target.value})} placeholder="健康、媽媽圈…"/></div>
+          <div className="form-group">
+            <label className="label">上傳照片（可選）</label>
+            {editData.photo && (
+              <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:10}}>
+                <div className="avatar" style={{width:54,height:54,overflow:"hidden"}}>
+                  <img src={editData.photo} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+                </div>
+                <button className="btn btn-danger btn-sm" onClick={()=>setEditData({...editData,photo:""})}>移除</button>
+              </div>
+            )}
+            <input
+              type="file"
+              accept="image/*"
+              className="input"
+              disabled={photoBusy}
+              onChange={e=>onPickPartnerPhoto(e.target.files?.[0])}
+            />
+            {photoError && <div className="text-xs" style={{color:"var(--red)",marginTop:6}}>{photoError}</div>}
+            <div className="text-xs text-muted mt-4">照片會存到資料庫；建議選擇小檔並以頭像用途為主。</div>
+          </div>
+          <div className="form-group"><label className="label">備注 / 喜好</label><textarea className="input" value={editData.notes} onChange={e=>setEditData({...editData,notes:e.target.value})}/></div>
+          <div className="flex gap-8 mt-8"><button className="btn btn-gold" onClick={saveP}>儲存</button><button className="btn btn-ghost" onClick={()=>setShowForm(false)}>取消</button></div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── CostSection ──────────────────────────────────────────────────
+function CostSection({ partner, onUpdate }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [draft, setDraft] = useState({date:new Date().toISOString().slice(0,10),type:"買貨",amount:"",note:""});
+  const costs = partner.costs||[];
+  const total = costs.reduce((a,c)=>a+c.amount,0);
+  const addCost = () => { if(!draft.amount)return; onUpdate({...partner,costs:[...costs,{...draft,id:uid(),amount:+draft.amount}]}); setDraft({date:new Date().toISOString().slice(0,10),type:"買貨",amount:"",note:""}); setShowAdd(false); };
+  const delCost = (id) => onUpdate({...partner,costs:costs.filter(c=>c.id!==id)});
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-8">
+        <div className="subheading" style={{margin:0}}>投入金費{total>0&&<span className="mono" style={{marginLeft:8,color:"var(--red)",fontSize:11}}>共 NT${total.toLocaleString()}</span>}</div>
+        <button className="btn btn-ghost btn-sm" onClick={()=>setShowAdd(!showAdd)}>＋</button>
+      </div>
+      {showAdd&&(
+        <div className="card-sm mb-8" style={{borderColor:"var(--gold-border)"}}>
+          <div className="form-row"><div className="form-group"><label className="label">日期</label><input type="date" className="input" value={draft.date} onChange={e=>setDraft({...draft,date:e.target.value})}/></div><div className="form-group"><label className="label">種類</label><select className="input" value={draft.type} onChange={e=>setDraft({...draft,type:e.target.value})}>{COST_TYPES.map(t=><option key={t}>{t}</option>)}</select></div></div>
+          <div className="form-row"><div className="form-group"><label className="label">金額 (NT$)</label><input type="number" className="input" value={draft.amount} onChange={e=>setDraft({...draft,amount:e.target.value})}/></div><div className="form-group"><label className="label">備注</label><input className="input" value={draft.note} onChange={e=>setDraft({...draft,note:e.target.value})}/></div></div>
+          <div className="flex gap-8"><button className="btn btn-gold btn-sm" onClick={addCost}>新增</button><button className="btn btn-ghost btn-sm" onClick={()=>setShowAdd(false)}>取消</button></div>
+        </div>
+      )}
+      {costs.length===0&&!showAdd&&<div className="text-sm text-muted">尚無投入紀錄</div>}
+      {costs.length>0&&(
+        <div style={{border:"1px solid var(--border)",borderRadius:8,overflow:"hidden"}}>
+          <div className="flex" style={{background:"var(--bg3)",padding:"5px 10px",borderBottom:"1px solid var(--border)"}}>
+            {["日期","種類","金額","備注",""].map((h,i)=><div key={i} className="mono" style={{fontSize:9,color:"var(--text3)",flex:i===3?2:1,minWidth:i===4?24:0}}>{h}</div>)}
+          </div>
+          {costs.map((c,i)=>(
+            <div key={c.id} className="flex items-center" style={{padding:"7px 10px",borderBottom:i<costs.length-1?"1px solid var(--border)":"none"}}>
+              <div className="mono text-xs text-muted" style={{flex:1}}>{c.date}</div>
+              <div style={{flex:1}}><span style={{fontSize:9,padding:"1px 5px",borderRadius:3,border:`1px solid ${TYPE_COLOR[c.type]||"#ccc"}`,color:TYPE_COLOR[c.type]||"#888",fontFamily:"'DM Mono',monospace"}}>{c.type}</span></div>
+              <div className="mono" style={{flex:1,color:"var(--red)",fontSize:11}}>NT${c.amount.toLocaleString()}</div>
+              <div className="text-xs text-muted" style={{flex:2}}>{c.note||"—"}</div>
+              <button style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",minWidth:24,fontSize:12}} onClick={()=>delCost(c.id)}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Timeline ─────────────────────────────────────────────────────
+function Timeline({ interactions, setInteractions, partners }) {
+  const [view, setView] = useState("list");
+  const [filter, setFilter] = useState("全部");
+  const [showForm, setShowForm] = useState(false);
+  const [editData, setEditData] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [calMonth, setCalMonth] = useState(()=>{ const n=new Date(); return {y:n.getFullYear(),m:n.getMonth()}; });
+
+  const sorted = [...interactions].sort((a, b) => {
+    const todayMs = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00").getTime();
+    const toMs = (s) => new Date(s + "T00:00:00").getTime();
+    const da = Math.abs(toMs(a.date) - todayMs);
+    const db = Math.abs(toMs(b.date) - todayMs);
+    if (da !== db) return da - db; // 越接近今天越上面
+    return a.date.localeCompare(b.date); // 同距離：日期較早
+  });
+  const filtered = filter==="全部"?sorted:filter==="待執行"?sorted.filter(i=>i.status==="待執行"):sorted.filter(i=>i.type===filter);
+  const getP = (id) => partners.find(p=>p.id===id);
+
+  const openNew = () => { setEditData({id:uid(),date:new Date().toISOString().slice(0,10),partnerId:"",type:"暖身",title:"",content:"",status:"待執行",tags:"",partnerPlan:"",actionItems:"",quote:""}); setShowForm(true); };
+  const saveItem = () => {
+    const entry = { ...editData, tags: editData.tags ? editData.tags.split(/[、,，]/).map(t => t.trim()).filter(Boolean) : [] };
+    if (entry.type === "上線會議") entry.actionItems = "";
+    let next = interactions.find(i => i.id === entry.id) ? interactions.map(i => i.id === entry.id ? entry : i) : [...interactions, entry];
+    if (entry.type === "上線會議") {
+      next = removeInteractionsSyncedFromMeeting(next, entry.id);
+      next = [...next, ...buildPartnerPlanSyncEntries(entry, partners)];
+    }
+    const isNewMeeting = !interactions.some(i => i.id === editData.id);
+    if (editData.type === "上線會議" && isNewMeeting) {
+      const lines = meetingPlanLinesForActions(entry.partnerPlan);
+      if (lines.length) {
+        const newItems = lines.map(l => ({ id: uid(), date: editData.date, partnerId: "", type: "規劃", title: l, content: `來自上線會議「${editData.title}」的行動項目`, status: "待執行", tags: ["上線會議"], partnerPlan: "", actionItems: "", quote: "" }));
+        next = [...next, ...newItems];
+      }
+    }
+    setInteractions(next); setShowForm(false);
+  };
+  const del = (id) => {
+    const target = interactions.find(i=>i.id===id);
+    let next = interactions.filter(i=>i.id!==id);
+    if (target?.type === "上線會議") {
+      next = removeInteractionsSyncedFromMeeting(next, id);
+      const prefix = `來自上線會議「${target.title}」的行動項目`;
+      next = next.filter(i => !(i.type === "規劃" && i.content === prefix));
+    }
+    setInteractions(next); setSelected(null);
+  };
+  const toggle = (id) => setInteractions(interactions.map(i=>i.id===id?{...i,status:i.status==="已完成"?"待執行":"已完成"}:i));
+
+  // Calendar helpers
+  const calDays = () => {
+    const {y,m}=calMonth;
+    const first=new Date(y,m,1).getDay();
+    const days=new Date(y,m+1,0).getDate();
+    const cells=[];
+    for(let i=0;i<first;i++) cells.push({date:new Date(y,m,i-first+1),cur:false});
+    for(let i=1;i<=days;i++) cells.push({date:new Date(y,m,i),cur:true});
+    while(cells.length%7) cells.push({date:new Date(y,m+1,cells.length-days-first+1),cur:false});
+    return cells;
+  };
+  const today=dk(new Date());
+  const iMap=interactions.reduce((acc,i)=>{ (acc[i.date]=acc[i.date]||[]).push(i); return acc; },{});
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-14">
+        <h2 className="heading" style={{margin:0}}>互動時間軸</h2>
+        <div className="flex gap-8">
+          <button className={`btn btn-sm ${view==="list"?"btn-gold":"btn-ghost"}`} onClick={()=>setView("list")}>列表</button>
+          <button className={`btn btn-sm ${view==="cal"?"btn-gold":"btn-ghost"}`} onClick={()=>setView("cal")}>📅 月曆</button>
+          <button className="btn btn-gold btn-sm" onClick={openNew}>＋ 新增</button>
+        </div>
+      </div>
+
+      {/* List view */}
+      {view==="list"&&(
+        <>
+          <div className="flex gap-8 mb-14" style={{flexWrap:"wrap"}}>
+            {["全部","待執行","上線會議","暖身","追蹤","規劃"].map(f=><button key={f} className={`btn btn-sm ${filter===f?"btn-gold":"btn-ghost"}`} style={f==="上線會議"&&filter!==f?{borderColor:"#c4b5fd",color:"var(--purple)"}:{}} onClick={()=>setFilter(f)}>{f}</button>)}
+          </div>
+          <div className="card" style={{padding:0}}>
+            {filtered.length===0&&<div className="empty">尚無紀錄</div>}
+            {filtered.map(item=>{
+              const p=getP(item.partnerId);
+              return (
+                <div key={item.id} className="timeline-item" onClick={()=>setSelected(item)}>
+                  <div className={`tl-dot type-${item.type}`}/>
+                  <div style={{flex:1}}>
+                    <div className="flex items-center gap-6" style={{flexWrap:"wrap"}}>
+                      <span style={{fontWeight:600,fontSize:14}}>{item.title}</span>
+                      <span className={`status-badge status-${item.status}`}>{item.status}</span>
+                      <span className="tag">{item.type}</span>
+                    </div>
+                    {p&&<div className="flex items-center gap-6 mt-4"><div className="avatar" style={{width:18,height:18,fontSize:9}}>{p.avatar}</div><span className="text-xs text-muted">{p.name}</span></div>}
+                    {item.content&&<div className="text-sm text-muted mt-4" style={{lineHeight:1.6}}>{item.content}</div>}
+                    <div className="text-xs mono" style={{color:"var(--text3)",marginTop:3}}>{item.date}</div>
+                  </div>
+                  <button className={`btn btn-sm ${item.status==="已完成"?"btn-gold":"btn-ghost"}`} style={{flexShrink:0,alignSelf:"flex-start"}} onClick={e=>{e.stopPropagation();toggle(item.id);}}>{item.status==="已完成"?"✓":"○"}</button>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* Calendar view — shows events + mini list below */}
+      {view==="cal"&&(
+        <div>
+          <div className="flex items-center justify-between mb-12">
+            <button className="btn btn-ghost btn-sm" onClick={()=>setCalMonth(p=>{const d=new Date(p.y,p.m-1);return{y:d.getFullYear(),m:d.getMonth()};})}>‹ 上月</button>
+            <span style={{fontFamily:"'Playfair Display',serif",color:var_gold,fontSize:18}}>{calMonth.y} 年 {calMonth.m+1} 月</span>
+            <button className="btn btn-ghost btn-sm" onClick={()=>setCalMonth(p=>{const d=new Date(p.y,p.m+1);return{y:d.getFullYear(),m:d.getMonth()};})}>下月 ›</button>
+          </div>
+          {/* Day headers */}
+          <div className="cal-grid" style={{marginBottom:3}}>
+            {["日","一","二","三","四","五","六"].map(d=><div key={d} className="mono" style={{textAlign:"center",fontSize:10,color:"var(--text3)",padding:"3px 0"}}>{d}</div>)}
+          </div>
+          {/* Calendar grid */}
+          <div className="cal-grid" style={{marginBottom:20}}>
+            {calDays().map((cell,i)=>{
+              const k=dk(cell.date);
+              const dayItems=iMap[k]||[];
+              const todayMs = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00").getTime();
+              const toMs = (s) => new Date(s + "T00:00:00").getTime();
+              const dayItemsSorted = [...dayItems].sort((a, b) => {
+                const da = Math.abs(toMs(a.date) - todayMs);
+                const db = Math.abs(toMs(b.date) - todayMs);
+                if (da !== db) return da - db; // 越接近今天越靠上
+                return b.date.localeCompare(a.date); // 距離相同：較新的在前
+              });
+              return (
+                <div key={i} className={`cal-cell${k===today?" today":""}${!cell.cur?" other-month":""}`}>
+                  <div className="mono" style={{fontSize:10,color:k===today?var_gold:"var(--text3)",marginBottom:2,fontWeight:k===today?700:400}}>{cell.date.getDate()}</div>
+                  {dayItemsSorted.slice(0,3).map(it=>{
+                    const p=getP(it.partnerId);
+                    return (
+                      <div key={it.id} className={`cal-event type-${it.type}`} onClick={()=>setSelected(it)} title={`${it.title} ${p?`· ${p.name}`:""} ${it.date}`}>
+                        {it.title}{p?` · ${p.name}`:""}
+                      </div>
+                    );
+                  })}
+                  {dayItemsSorted.length>3&&<div style={{fontSize:8,color:"var(--text3)"}}>+{dayItemsSorted.length-3}</div>}
+                </div>
+              );
+            })}
+          </div>
+          {/* This month list below calendar */}
+          <div className="subheading">本月紀錄</div>
+          <div className="card" style={{padding:0}}>
+            {Object.keys(iMap)
+              .filter(k=>k.startsWith(`${calMonth.y}-${String(calMonth.m+1).padStart(2,"0")}`))
+              .sort((a,b)=>a.localeCompare(b))
+              .flatMap(k=>[...(iMap[k]||[])].sort((a,b)=>{
+                const todayMs = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00").getTime();
+                const toMs = (s) => new Date(s + "T00:00:00").getTime();
+                const da = Math.abs(toMs(a.date) - todayMs);
+                const db = Math.abs(toMs(b.date) - todayMs);
+                if (da !== db) return da - db;
+                return b.date.localeCompare(a.date);
+              }))
+              .map(item=>{
+                const p=getP(item.partnerId);
+                return (
+                  <div key={item.id} className="timeline-item" onClick={()=>setSelected(item)}>
+                    <div className={`tl-dot type-${item.type}`}/>
+                    <div style={{flex:1}}>
+                      <div className="flex items-center gap-6" style={{flexWrap:"wrap"}}>
+                        <span style={{fontWeight:600,fontSize:13}}>{item.title}</span>
+                        <span className={`status-badge status-${item.status}`}>{item.status}</span>
+                        <span className="tag">{item.type}</span>
+                      </div>
+                      <div className="text-xs mono text-muted mt-3">{item.date}{p&&<span> · {p.name}</span>}</div>
+                    </div>
+                    <button className={`btn btn-sm ${item.status==="已完成"?"btn-gold":"btn-ghost"}`} style={{flexShrink:0,alignSelf:"flex-start"}} onClick={e=>{e.stopPropagation();toggle(item.id);}}>{item.status==="已完成"?"✓":"○"}</button>
+                  </div>
+                );
+              })}
+            {!Object.keys(iMap).some(k=>k.startsWith(`${calMonth.y}-${String(calMonth.m+1).padStart(2,"0")}`))&&<div className="empty">本月尚無紀錄</div>}
+          </div>
+        </div>
+      )}
+
+      {/* Detail modal */}
+      {selected&&(
+        <Modal title={selected.title} onClose={()=>setSelected(null)}>
+          <div className="flex gap-8 mb-10">
+            <span className={`status-badge status-${selected.status}`}>{selected.status}</span>
+            <span className="tag" style={selected.type==="上線會議"?{background:"#f5f3ff",borderColor:"#c4b5fd",color:"var(--purple)"}:{}}>{selected.type}</span>
+          </div>
+          {selected.content&&<div className="text-sm" style={{lineHeight:1.8}}>{selected.content}</div>}
+          {selected.type==="上線會議"&&mergeMeetingPlanFields(selected.partnerPlan, selected.actionItems)&&(
+            <div className="card-sm mt-10"><div className="label">具體規劃與待辦</div><div className="text-sm mt-5" style={{lineHeight:1.8,whiteSpace:"pre-wrap"}}>{mergeMeetingPlanFields(selected.partnerPlan, selected.actionItems)}</div></div>
+          )}
+          {selected.type==="上線會議"&&selected.quote&&(
+            <div style={{background:"#f5f3ff",border:"1px solid #c4b5fd",borderRadius:8,padding:"10px 14px",marginTop:10}}>
+              <div className="label" style={{color:"var(--purple)",marginBottom:4}}>💬 上線金句</div>
+              <div style={{fontSize:13,color:"var(--purple)",fontStyle:"italic",lineHeight:1.8}}>「{selected.quote}」</div>
+            </div>
+          )}
+          {selected.type!=="上線會議"&&selected.partnerId&&<div className="mt-8 text-sm text-muted">夥伴：{getP(selected.partnerId)?.name}</div>}
+          <div className="mono text-xs text-muted mt-8">{selected.date}</div>
+          <div className="divider"/>
+          <div className="flex gap-8">
+            <button className="btn btn-gold btn-sm" onClick={()=>{ setSelected(null); setEditData({...selected,tags:Array.isArray(selected.tags)?selected.tags.join("、"):selected.tags,partnerPlan:selected.type==="上線會議"?mergeMeetingPlanFields(selected.partnerPlan,selected.actionItems):(selected.partnerPlan||""),actionItems:selected.type==="上線會議"?"":(selected.actionItems||""),quote:selected.quote||""}); setShowForm(true); }}>編輯</button>
+            <button className="btn btn-danger btn-sm" onClick={()=>del(selected.id)}>刪除</button>
+          </div>
+        </Modal>
+      )}
+
+      {showForm&&editData&&(
+        <Modal title={`${interactions.find(i=>i.id===editData.id)?"編輯":"新增"}紀錄`} onClose={()=>setShowForm(false)} wide>
+          <div className="form-row">
+            <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={editData.date} onChange={e=>setEditData({...editData,date:e.target.value})}/></div>
+            <div className="form-group"><label className="label">類型</label>
+              <select className="input" value={editData.type} onChange={e=>setEditData({...editData,type:e.target.value,partnerId:e.target.value==="上線會議"?"":editData.partnerId})}>
+                {["暖身","追蹤","規劃","上線會議"].map(t=><option key={t}>{t}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="form-group"><label className="label">標題 *</label><input className="input" value={editData.title} onChange={e=>setEditData({...editData,title:e.target.value})} placeholder={editData.type==="上線會議"?"例：04/05 與林佳蓉討論四月計畫":""}/>
+          </div>
+
+          {/* 上線會議專屬欄位 */}
+          {editData.type==="上線會議"?(
+            <div style={{background:"#f5f3ff",border:"1.5px solid #c4b5fd",borderRadius:10,padding:"14px 16px",marginBottom:12}}>
+              <div className="subheading" style={{color:"var(--purple)",marginBottom:10}}>🟣 上線會議專屬紀錄</div>
+              <div className="form-group"><label className="label">討論主題 / 結論</label><textarea className="input" style={{minHeight:80}} value={editData.content||""} onChange={e=>setEditData({...editData,content:e.target.value})} placeholder="今天討論了什麼？結論是什麼？"/></div>
+              <div className="form-group"><label className="label">具體規劃與待辦（一行一項）</label><textarea className="input" style={{minHeight:120,fontFamily:"'DM Mono',monospace",fontSize:12}} value={editData.partnerPlan||""} onChange={e=>setEditData({...editData,partnerPlan:e.target.value})} placeholder={"王思涵：本週約談場\n幫陳威宇整理獎金說明"}/>
+                <div className="text-xs text-muted mt-6" style={{lineHeight:1.6}}>每行成為一筆待執行規劃；行內含人脈姓名者會同步到對方互動紀錄（姓名須與人脈網絡一致）。</div>
+              </div>
+              <div className="form-group"><label className="label">上線給的金句 / 激勵話語</label><input className="input" value={editData.quote||""} onChange={e=>setEditData({...editData,quote:e.target.value})} placeholder="例：做不到不是能力問題，是還沒找到對的方式"/></div>
+            </div>
+          ):(
+            <>
+              <div className="form-group"><label className="label">關聯夥伴</label><select className="input" value={editData.partnerId} onChange={e=>setEditData({...editData,partnerId:e.target.value})}><option value="">（無）</option>{partners.filter(p=>p.role!=="上線").map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+              <div className="form-group"><label className="label">內容</label><textarea className="input" value={editData.content||""} onChange={e=>setEditData({...editData,content:e.target.value})}/></div>
+            </>
+          )}
+
+          <div className="form-row">
+            <div className="form-group"><label className="label">狀態</label><select className="input" value={editData.status} onChange={e=>setEditData({...editData,status:e.target.value})}>{["待執行","已完成"].map(s=><option key={s}>{s}</option>)}</select></div>
+            <div className="form-group"><label className="label">標籤</label><input className="input" value={editData.tags} onChange={e=>setEditData({...editData,tags:e.target.value})}/></div>
+          </div>
+          <div className="flex gap-8 mt-8"><button className="btn btn-gold" onClick={saveItem}>儲存</button><button className="btn btn-ghost" onClick={()=>setShowForm(false)}>取消</button></div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── Playbook ─────────────────────────────────────────────────────
+function Playbook({ playbook, setPlaybook }) {
+  const [catFilter, setCatFilter] = useState("全部");
+  const [showForm, setShowForm] = useState(false);
+  const [expanded, setExpanded] = useState(null);
+  const [draft, setDraft] = useState({id:"",category:"",situation:"",response:"",tags:"",star:false});
+  const cats = ["全部",...Array.from(new Set(playbook.map(p=>p.category).filter(Boolean)))];
+  const fl = catFilter==="全部"?playbook:playbook.filter(p=>p.category===catFilter);
+  const displayed = [...fl.filter(p=>p.star),...fl.filter(p=>!p.star)];
+  const openNew = () => { setDraft({id:uid(),category:"",situation:"",response:"",tags:"",star:false}); setShowForm(true); };
+  const save = () => {
+    const entry={...draft,tags:draft.tags?draft.tags.split(/[、,，]/).map(t=>t.trim()).filter(Boolean):[]};
+    const next=playbook.find(p=>p.id===entry.id)?playbook.map(p=>p.id===entry.id?entry:p):[...playbook,entry];
+    setPlaybook(next); setShowForm(false);
+  };
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-14">
+        <h2 className="heading" style={{margin:0}}>上線教學手冊</h2>
+        <button className="btn btn-gold btn-sm" onClick={openNew}>＋ 新增情境</button>
+      </div>
+      <div className="flex gap-8 mb-16" style={{flexWrap:"wrap"}}>
+        {cats.map(c=><button key={c} className={`btn btn-sm ${catFilter===c?"btn-gold":"btn-ghost"}`} onClick={()=>setCatFilter(c)}>{c}</button>)}
+      </div>
+      {displayed.length===0&&<div className="empty">尚無情境</div>}
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {displayed.map(item=>(
+          <div key={item.id} className="card" style={{cursor:"pointer",borderColor:item.star?"var(--gold-border)":"var(--border)"}} onClick={()=>setExpanded(expanded===item.id?null:item.id)}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-10" style={{flex:1}}>
+                <button style={{background:"none",border:"none",cursor:"pointer",fontSize:15,flexShrink:0}} onClick={e=>{e.stopPropagation();setPlaybook(playbook.map(p=>p.id===item.id?{...p,star:!p.star}:p));}}>{item.star?"⭐":"☆"}</button>
+                <div>
+                  <div className="flex items-center gap-5" style={{flexWrap:"wrap",marginBottom:3}}>
+                    {item.category&&<span className="tag tag-gold">{item.category}</span>}
+                    {(Array.isArray(item.tags)?item.tags:[]).map(t=><span key={t} className="tag">{t}</span>)}
+                  </div>
+                  <div style={{fontWeight:600,fontSize:13}}>💬 {item.situation}</div>
+                </div>
+              </div>
+              <span style={{color:"var(--text3)",flexShrink:0,fontSize:12}}>{expanded===item.id?"▲":"▼"}</span>
+            </div>
+            {expanded===item.id&&(
+              <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid var(--border)"}}>
+                <div className="subheading mb-5">建議回應</div>
+                <div className="card-sm" style={{borderLeft:"3px solid var(--gold)",borderRadius:"0 8px 8px 0"}}>
+                  <div style={{fontSize:13,lineHeight:1.9}}>{item.response}</div>
+                </div>
+                <div className="flex gap-8 mt-10">
+                  <button className="btn btn-ghost btn-sm" onClick={e=>{e.stopPropagation();setDraft({...item,tags:Array.isArray(item.tags)?item.tags.join("、"):item.tags});setShowForm(true);}}>編輯</button>
+                  <button className="btn btn-danger btn-sm" onClick={e=>{e.stopPropagation();setPlaybook(playbook.filter(p=>p.id!==item.id));}}>刪除</button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {showForm&&(
+        <Modal title="新增 / 編輯情境" onClose={()=>setShowForm(false)} wide>
+          <div className="form-row">
+            <div className="form-group"><label className="label">分類</label><input className="input" value={draft.category} onChange={e=>setDraft({...draft,category:e.target.value})} placeholder="開口邀約"/></div>
+            <div className="form-group"><label className="label">標籤</label><input className="input" value={draft.tags} onChange={e=>setDraft({...draft,tags:e.target.value})}/></div>
+          </div>
+          <div className="form-group"><label className="label">情境 *</label><textarea className="input" style={{minHeight:60}} value={draft.situation} onChange={e=>setDraft({...draft,situation:e.target.value})}/></div>
+          <div className="form-group"><label className="label">建議應對 *</label><textarea className="input" style={{minHeight:100}} value={draft.response} onChange={e=>setDraft({...draft,response:e.target.value})}/></div>
+          <div className="flex items-center gap-8 mt-6"><input type="checkbox" id="star" checked={draft.star} onChange={e=>setDraft({...draft,star:e.target.checked})} style={{accentColor:var_gold}}/><label htmlFor="star" className="text-sm" style={{cursor:"pointer"}}>⭐ 置頂重點</label></div>
+          <div className="flex gap-8 mt-12"><button className="btn btn-gold" onClick={save}>儲存</button><button className="btn btn-ghost" onClick={()=>setShowForm(false)}>取消</button></div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── AI Coach ─────────────────────────────────────────────────────
+function AICoach({ partners, interactions, todos }) {
+  const [mode, setMode] = useState("advice");
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [selP, setSelP] = useState("");
+  const [apiKey, setApiKey] = useState(()=>sessionStorage.getItem("crm_api_key")||"");
+  const [showKey, setShowKey] = useState(false);
+  const bottomRef = useRef(null);
+
+  useEffect(()=>{ bottomRef.current?.scrollIntoView({behavior:"smooth"}); },[messages,loading]);
+
+  const saveApiKey = (k) => { setApiKey(k); sessionStorage.setItem("crm_api_key", k); };
+
+  const buildSystem = () => {
+    const ps=partners.filter(p=>p.role!=="上線").map(p=>`- ${p.name}（${p.role}）：${p.notes||"無"}，標籤：${(p.tags||[]).join("、")||"無"}`).join("\n");
+    const ri=[...interactions].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,8).map(i=>{const p=partners.find(x=>x.id===i.partnerId);return `- [${i.date}] ${i.type}｜${i.title}（${p?.name||"無"}）：${i.status}`;}).join("\n");
+    const pt=todos.filter(t=>!t.done).map(t=>`- ${t.title}`).join("\n");
+    const rp=selP?partners.find(p=>p.id===selP):null;
+    if(mode==="advice") return `你是電商直銷人脈經營顧問，親切實際，使用繁體中文。\n【夥伴】\n${ps}\n【近期互動】\n${ri}\n【待辦】\n${pt}\n根據資料給具體行動建議，條列清楚。`;
+    if(mode==="cheer") return `你是電商直銷心理支持教練，溫暖真誠有力量，使用繁體中文。不說廢話，真實有溫度地鼓勵對方，必要時分享一句激勵的話。`;
+    if(mode==="roleplay") return `你是電商直銷對話模擬教練，使用繁體中文。\n用戶練習跟${rp?`「${rp.name}」（${rp.role}，備注：${rp.notes||"無"}）`:"潛在夥伴"}對話。\n先扮演對方說一句話，等用戶回應後給評分（0-10分）與改善建議。用【對方】和【教練點評】區分角色。`;
+    return "";
+  };
+
+  const send = async () => {
+    if(!input.trim()||loading) return;
+    const userMsg={role:"user",content:input.trim()};
+    const newMsgs=[...messages,userMsg];
+    setMessages(newMsgs); setInput(""); setLoading(true);
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(()=>controller.abort(), 60000);
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "x-api-key": apiKey,
+          "anthropic-version":"2023-06-01",
+          "anthropic-dangerous-direct-browser-access":"true",
+        },
+        signal: controller.signal,
+        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1000,system:buildSystem(),messages:newMsgs}),
+      });
+      clearTimeout(timeout);
+      if(!res.ok) {
+        const errBody = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errBody.slice(0,200)}`);
+      }
+      const data=await res.json();
+      const reply=data.content?.find(b=>b.type==="text")?.text||"（無回應）";
+      setMessages([...newMsgs,{role:"assistant",content:reply}]);
+    } catch(e) {
+      const msg = e.name==="AbortError" ? "請求逾時，請重試。" : `錯誤：${e.message}`;
+      setMessages([...newMsgs,{role:"assistant",content:`⚠️ ${msg}`}]);
+    }
+    setLoading(false);
+  };
+
+  const MODES=[
+    {id:"advice",label:"💡 給我建議",desc:"根據夥伴資料與互動紀錄"},
+    {id:"cheer",label:"🔥 加油打氣",desc:"我需要動力與心理支持"},
+    {id:"roleplay",label:"🎭 模擬對話",desc:"練習怎麼跟夥伴開口"},
+  ];
+  const starters={
+    advice:"你好！我已讀取你的資料。有什麼想問的嗎？例如：「我應該優先跟哪位夥伴聯繫？」",
+    cheer:"嘿，你今天還在這裡，這本身就很了不起。💪 跟我說說，最近怎麼了？",
+    roleplay:`好！${selP?`模擬對象：${partners.find(p=>p.id===selP)?.name}。`:""}準備好了嗎？我來扮演對方，你來練習回應。`,
+  };
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 100px)",minHeight:500}}>
+      <div className="flex items-center justify-between mb-12">
+        <h2 className="heading" style={{margin:0}}>AI 教練</h2>
+        {messages.length>0&&<button className="btn btn-ghost btn-sm" onClick={()=>setMessages([])}>清空</button>}
+      </div>
+
+      {/* API Key 設定 */}
+      <div className="card-sm mb-12" style={{borderColor: apiKey ? "var(--green)" : "var(--gold-border)", background: apiKey ? "#f0fdf4" : "var(--gold-light)", flexShrink:0}}>
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="label" style={{color: apiKey ? "var(--green)" : var_gold}}>
+              {apiKey ? "✓ API Key 已設定" : "⚠️ 需要 Anthropic API Key"}
+            </div>
+            {!apiKey && <div className="text-xs text-muted mt-4">請至 console.anthropic.com 取得你的 API key</div>}
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={()=>setShowKey(!showKey)}>
+            {showKey ? "收起" : apiKey ? "更換" : "設定"}
+          </button>
+        </div>
+        {showKey && (
+          <div className="flex gap-8 mt-10">
+            <input
+              className="input"
+              style={{flex:1, fontFamily:"'DM Mono',monospace", fontSize:12}}
+              type="password"
+              placeholder="sk-ant-api03-..."
+              value={apiKey}
+              onChange={e=>saveApiKey(e.target.value)}
+            />
+            <button className="btn btn-gold btn-sm" onClick={()=>setShowKey(false)}>確認</button>
+          </div>
+        )}
+      </div>
+
+      {/* Mode selector */}
+      <div className="grid-3" style={{marginBottom:12,flexShrink:0}}>
+        {MODES.map(m=>(
+          <div key={m.id} className="card" style={{cursor:"pointer",borderColor:mode===m.id?"var(--gold-border)":"var(--border)",background:mode===m.id?"var(--gold-light)":"#fff",transition:"all .18s",padding:12}} onClick={()=>{setMode(m.id);setMessages([]);setInput("");setSelP("");}}>
+            <div style={{fontWeight:700,fontSize:13}}>{m.label}</div>
+            <div className="text-xs text-muted mt-5">{m.desc}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Roleplay partner selector */}
+      {mode==="roleplay"&&messages.length===0&&(
+        <div className="card-sm" style={{marginBottom:10,flexShrink:0}}>
+          <label className="label">選擇模擬對象（選填）</label>
+          <select className="input mt-5" value={selP} onChange={e=>setSelP(e.target.value)}>
+            <option value="">通用情境</option>
+            {partners.filter(p=>p.role!=="上線").map(p=><option key={p.id} value={p.id}>{p.name}（{p.role}）</option>)}
+          </select>
+        </div>
+      )}
+
+      {/* Chat window — flex:1 with overflow */}
+      <div className="card" style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column",padding:0,minHeight:0}}>
+        {messages.length===0?(
+          <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:14,padding:24}}>
+            <div style={{fontSize:42}}>{mode==="advice"?"💡":mode==="cheer"?"🔥":"🎭"}</div>
+            <div style={{color:"var(--text2)",fontSize:13,textAlign:"center",maxWidth:290,lineHeight:1.8}}>
+              {mode==="advice"&&"根據你的夥伴資料和互動紀錄，給你具體的行動建議。"}
+              {mode==="cheer"&&"不管今天遇到什麼，我都在。跟我說說你的狀況。"}
+              {mode==="roleplay"&&"模擬真實對話情境，即時點評你的回應方式。"}
+            </div>
+            <button className="btn btn-gold btn-sm" disabled={!apiKey} style={{opacity:apiKey?1:.5}} onClick={()=>setMessages([{role:"assistant",content:starters[mode]}])}>
+              {apiKey ? "開始對話" : "請先設定 API Key"}
+            </button>
+          </div>
+        ):(
+          <>
+            {/* Message list — scrollable */}
+            <div style={{flex:1,overflowY:"auto",padding:16,display:"flex",flexDirection:"column",gap:12,minHeight:0}}>
+              {messages.map((m,i)=>(
+                <div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start",alignItems:"flex-start",gap:8}}>
+                  {m.role==="assistant"&&(
+                    <div style={{width:28,height:28,borderRadius:"50%",background:"var(--gold-light)",border:"1.5px solid var(--gold-border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0}}>🤖</div>
+                  )}
+                  <div style={{
+                    maxWidth:"76%",padding:"10px 14px",
+                    borderRadius:m.role==="user"?"14px 14px 3px 14px":"14px 14px 14px 3px",
+                    background:m.role==="user"?var_gold:"#fff",
+                    color:m.role==="user"?"#fff":"var(--text)",
+                    fontSize:13,lineHeight:1.85,
+                    border:m.role==="assistant"?"1px solid var(--border)":"none",
+                    boxShadow:m.role==="assistant"?"var(--shadow)":"none",
+                    whiteSpace:"pre-wrap",wordBreak:"break-word",
+                  }}>
+                    {m.content}
+                  </div>
+                </div>
+              ))}
+              {loading&&(
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{width:28,height:28,borderRadius:"50%",background:"var(--gold-light)",border:"1.5px solid var(--gold-border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}}>🤖</div>
+                  <div style={{background:"#fff",border:"1px solid var(--border)",borderRadius:"14px 14px 14px 3px",padding:"10px 16px",color:"var(--text3)",fontSize:13}}>思考中…</div>
+                </div>
+              )}
+              <div ref={bottomRef}/>
+            </div>
+            {/* Input bar — always at bottom */}
+            <div style={{padding:"10px 14px",borderTop:"1.5px solid var(--border)",display:"flex",gap:8,flexShrink:0,background:"#fff"}}>
+              <input className="input" style={{flex:1}} placeholder="輸入問題或回應… (Enter 送出)" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&send()}/>
+              <button className="btn btn-gold btn-sm" onClick={send} disabled={loading||!input.trim()||!apiKey}>送出</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Quotes ───────────────────────────────────────────────────────
+function QuotesTab({ quotes, setQuotes }) {
+  const [showForm, setShowForm] = useState(false);
+  const [draft, setDraft] = useState({id:"",text:"",author:"",date:new Date().toISOString().slice(0,10)});
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-14">
+        <h2 className="heading" style={{margin:0}}>金句收藏 ✨</h2>
+        <button className="btn btn-gold btn-sm" onClick={()=>{setDraft({id:uid(),text:"",author:"",date:new Date().toISOString().slice(0,10)});setShowForm(true);}}>＋ 新增</button>
+      </div>
+      <div className="grid-2">
+        {quotes.map(q=>(
+          <div key={q.id} className="quote-card">
+            <div className="quote-text">{q.text}</div>
+            {q.author&&<div className="quote-author">— {q.author}</div>}
+            <div className="flex items-center justify-between mt-8"><span className="text-xs mono text-muted">{q.date}</span><button className="btn btn-danger btn-sm" onClick={()=>setQuotes(quotes.filter(x=>x.id!==q.id))}>刪除</button></div>
+          </div>
+        ))}
+      </div>
+      {showForm&&(
+        <Modal title="新增金句" onClose={()=>setShowForm(false)}>
+          <div className="form-group"><label className="label">金句內容 *</label><textarea className="input" style={{minHeight:80}} value={draft.text} onChange={e=>setDraft({...draft,text:e.target.value})}/></div>
+          <div className="form-row">
+            <div className="form-group"><label className="label">來源 / 作者</label><input className="input" value={draft.author} onChange={e=>setDraft({...draft,author:e.target.value})}/></div>
+            <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={draft.date} onChange={e=>setDraft({...draft,date:e.target.value})}/></div>
+          </div>
+          <div className="flex gap-8 mt-8"><button className="btn btn-gold" onClick={()=>{setQuotes([...quotes,draft]);setShowForm(false);}}>儲存</button><button className="btn btn-ghost" onClick={()=>setShowForm(false)}>取消</button></div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── Modal ────────────────────────────────────────────────────────
+function Modal({ title, children, onClose, wide }) {
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:wide?640:500}}>
+        <div className="modal-header">
+          <h3 style={{fontFamily:"'Playfair Display',serif",color:var_gold,fontSize:17}}>{title}</h3>
+          <button className="close-btn" onClick={onClose}>✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
