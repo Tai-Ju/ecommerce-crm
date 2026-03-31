@@ -296,6 +296,102 @@ function parsePartnerCsvText(text) {
   return { rows, skippedEmpty, errors };
 }
 
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** 上線教學手冊迷你排版（安全）：
+ * - **粗體**、_斜體_、__底線__、~~刪除線~~、==螢光標記==
+ * - [color=#hex]文字[/color]、[bg=#hex]文字[/bg]
+ * - [size=sm|md|lg]文字[/size]
+ * - 逐行：以 "> " 開頭 = 引用；以 "- " / "* " 開頭 = 清單；以 "1. " 開頭 = 編號
+ */
+function playbookMiniRichToHtml(text) {
+  const raw = String(text ?? "");
+  const lines = raw.split(/\r?\n/);
+
+  const sizeMap = { sm: 12, md: 13, lg: 15 };
+  const safeColor = (c) => {
+    const s = String(c || "").trim();
+    if (/^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(s)) return s;
+    return null;
+  };
+
+  const inline = (t) => {
+    let h = escapeHtml(t);
+
+    // bbcode-like tags
+    h = h.replace(/\[color=([^\]]+)\]([\s\S]*?)\[\/color\]/g, (_m, c, inner) => {
+      const col = safeColor(c) || "#b8860b";
+      return `<span style="color:${col};font-weight:600">${inner}</span>`;
+    });
+    h = h.replace(/\[bg=([^\]]+)\]([\s\S]*?)\[\/bg\]/g, (_m, c, inner) => {
+      const col = safeColor(c) || "#fde68a";
+      return `<span style="background:${col};padding:0 3px;border-radius:4px">${inner}</span>`;
+    });
+    h = h.replace(/\[size=(sm|md|lg)\]([\s\S]*?)\[\/size\]/g, (_m, s, inner) => {
+      const px = sizeMap[s] || 13;
+      return `<span style="font-size:${px}px">${inner}</span>`;
+    });
+
+    // markdown-ish emphasis
+    h = h.replace(/\*\*([\s\S]+?)\*\*/g, "<strong>$1</strong>");
+    h = h.replace(/__([\s\S]+?)__/g, "<u>$1</u>");
+    h = h.replace(/~~([\s\S]+?)~~/g, "<s>$1</s>");
+    h = h.replace(/==([\s\S]+?)==/g, "<mark>$1</mark>");
+    h = h.replace(/_([\s\S]+?)_/g, "<em>$1</em>");
+
+    return h;
+  };
+
+  const blocks = [];
+  let ul = null;
+  let ol = null;
+  const flushLists = () => {
+    if (ul) { blocks.push(`<ul>${ul.join("")}</ul>`); ul = null; }
+    if (ol) { blocks.push(`<ol>${ol.join("")}</ol>`); ol = null; }
+  };
+
+  for (const ln of lines) {
+    const line = String(ln ?? "");
+    const mOl = line.match(/^\s*\d+\.\s+(.*)$/);
+    const mUl = line.match(/^\s*[-*]\s+(.*)$/);
+    const mQt = line.match(/^\s*>\s+(.*)$/);
+
+    if (mOl) {
+      if (ul) flushLists();
+      if (!ol) ol = [];
+      ol.push(`<li>${inline(mOl[1])}</li>`);
+      continue;
+    }
+    if (mUl) {
+      if (ol) flushLists();
+      if (!ul) ul = [];
+      ul.push(`<li>${inline(mUl[1])}</li>`);
+      continue;
+    }
+
+    flushLists();
+    if (mQt) {
+      blocks.push(`<blockquote>${inline(mQt[1])}</blockquote>`);
+      continue;
+    }
+    if (line.trim() === "") {
+      blocks.push("<br/>");
+      continue;
+    }
+    blocks.push(`<div>${inline(line)}</div>`);
+  }
+  flushLists();
+
+  return blocks.join("");
+}
+
 function removeInteractionsSyncedFromMeeting(interactions, meetingId) {
   return interactions.filter(i => i.fromMeetingId !== meetingId);
 }
@@ -438,6 +534,9 @@ const css = `
   .partner-filters-row{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;overflow-x:auto;min-width:0}
   .partner-filters-row .input{width:110px;min-width:110px}
   .playbook-text{white-space:pre-wrap;word-break:break-word}
+  .playbook-text mark{background:#fde68a;padding:0 3px;border-radius:4px}
+  .playbook-text blockquote{margin:8px 0;padding:8px 12px;border-left:3px solid var(--gold-border);background:rgba(184,134,11,.06);border-radius:0 10px 10px 0}
+  .playbook-text ul,.playbook-text ol{margin:8px 0 8px 18px}
 
   /* ── Tags ── */
   .tag{display:inline-block;padding:2px 7px;border-radius:4px;font-size:11px;background:var(--bg3);border:1px solid var(--border);color:var(--text2);margin:2px;font-family:'DM Mono',monospace}
@@ -1798,6 +1897,9 @@ function Playbook({ playbook, setPlaybook }) {
   const [showForm, setShowForm] = useState(false);
   const [expanded, setExpanded] = useState(null);
   const [draft, setDraft] = useState({id:"",category:"",situation:"",response:"",tags:"",star:false});
+  const situationRef = useRef(null);
+  const responseRef = useRef(null);
+  const [activeField, setActiveField] = useState("response"); // situation | response
   const cats = ["全部",...Array.from(new Set(playbook.map(p=>p.category).filter(Boolean)))];
   const fl = catFilter==="全部"?playbook:playbook.filter(p=>p.category===catFilter);
   const displayed = [...fl.filter(p=>p.star),...fl.filter(p=>!p.star)];
@@ -1807,6 +1909,51 @@ function Playbook({ playbook, setPlaybook }) {
     const next=playbook.find(p=>p.id===entry.id)?playbook.map(p=>p.id===entry.id?entry:p):[...playbook,entry];
     setPlaybook(next); setShowForm(false);
   };
+
+  const applyWrap = (field, before, after) => {
+    const ref = field === "situation" ? situationRef : responseRef;
+    const el = ref.current;
+    const src = String(draft[field] ?? "");
+    const s = el?.selectionStart ?? src.length;
+    const e = el?.selectionEnd ?? src.length;
+    const next = src.slice(0, s) + before + src.slice(s, e) + after + src.slice(e);
+    const nextPos = s + before.length;
+    setDraft({ ...draft, [field]: next });
+    requestAnimationFrame(() => {
+      const ta = ref.current;
+      if (!ta) return;
+      ta.focus();
+      const selEnd = e + before.length;
+      ta.setSelectionRange(nextPos, selEnd);
+    });
+  };
+
+  const activeWrap = (before, after) => applyWrap(activeField, before, after);
+
+  const applyPrefix = (field, prefix) => {
+    const ref = field === "situation" ? situationRef : responseRef;
+    const el = ref.current;
+    const src = String(draft[field] ?? "");
+    const s = el?.selectionStart ?? src.length;
+    const e = el?.selectionEnd ?? src.length;
+    const before = src.slice(0, s);
+    const sel = src.slice(s, e);
+    const after = src.slice(e);
+    const lines = sel.length ? sel.split(/\r?\n/) : [""];
+    const nextSel = lines.map((l) => `${prefix}${l}`).join("\n");
+    const next = before + nextSel + after;
+    setDraft({ ...draft, [field]: next });
+    requestAnimationFrame(() => {
+      const ta = ref.current;
+      if (!ta) return;
+      ta.focus();
+      const ns = s;
+      const ne = s + nextSel.length;
+      ta.setSelectionRange(ns, ne);
+    });
+  };
+
+  const activePrefix = (prefix) => applyPrefix(activeField, prefix);
   return (
     <div>
       <div className="flex items-center justify-between mb-14">
@@ -1828,7 +1975,11 @@ function Playbook({ playbook, setPlaybook }) {
                     {item.category&&<span className="tag tag-gold">{item.category}</span>}
                     {(Array.isArray(item.tags)?item.tags:[]).map(t=><span key={t} className="tag">{t}</span>)}
                   </div>
-                  <div className="playbook-text" style={{fontWeight:600,fontSize:13}}>💬 {item.situation}</div>
+                  <div
+                    className="playbook-text"
+                    style={{fontWeight:600,fontSize:13,textAlign:"left"}}
+                    dangerouslySetInnerHTML={{ __html: playbookMiniRichToHtml(`💬 ${item.situation || ""}`) }}
+                  />
                 </div>
               </div>
               <span style={{color:"var(--text3)",flexShrink:0,fontSize:12}}>{expanded===item.id?"▲":"▼"}</span>
@@ -1836,8 +1987,12 @@ function Playbook({ playbook, setPlaybook }) {
             {expanded===item.id&&(
               <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid var(--border)"}}>
                 <div className="subheading mb-5">建議回應</div>
-                <div className="card-sm" style={{borderLeft:"3px solid var(--gold)",borderRadius:"0 8px 8px 0"}}>
-                  <div className="playbook-text" style={{fontSize:13,lineHeight:1.9}}>{item.response}</div>
+                <div className="card-sm" style={{borderLeft:"3px solid var(--gold)",borderRadius:"0 8px 8px 0",textAlign:"left"}}>
+                  <div
+                    className="playbook-text"
+                    style={{fontSize:13,lineHeight:1.9,textAlign:"left"}}
+                    dangerouslySetInnerHTML={{ __html: playbookMiniRichToHtml(item.response || "") }}
+                  />
                 </div>
                 <div className="flex gap-8 mt-10">
                   <button className="btn btn-ghost btn-sm" onClick={e=>{e.stopPropagation();setDraft({...item,tags:Array.isArray(item.tags)?item.tags.join("、"):item.tags});setShowForm(true);}}>編輯</button>
@@ -1854,8 +2009,31 @@ function Playbook({ playbook, setPlaybook }) {
             <div className="form-group"><label className="label">分類</label><input className="input" value={draft.category} onChange={e=>setDraft({...draft,category:e.target.value})} placeholder="開口邀約"/></div>
             <div className="form-group"><label className="label">標籤</label><input className="input" value={draft.tags} onChange={e=>setDraft({...draft,tags:e.target.value})}/></div>
           </div>
-          <div className="form-group"><label className="label">情境 *</label><textarea className="input" style={{minHeight:60}} value={draft.situation} onChange={e=>setDraft({...draft,situation:e.target.value})}/></div>
-          <div className="form-group"><label className="label">建議應對 *</label><textarea className="input" style={{minHeight:100}} value={draft.response} onChange={e=>setDraft({...draft,response:e.target.value})}/></div>
+          <div className="form-group"><label className="label">情境 *</label><textarea ref={situationRef} className="input" style={{minHeight:60,textAlign:"left"}} value={draft.situation} onChange={e=>setDraft({...draft,situation:e.target.value})} onFocus={()=>setActiveField("situation")}/></div>
+
+          <div className="form-group">
+            <div className="flex items-center justify-between" style={{gap:8,flexWrap:"wrap"}}>
+              <label className="label" style={{margin:0}}>建議應對 *</label>
+              <div className="flex items-center" style={{gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={()=>activeWrap("**","**")}><span className="mono" style={{fontWeight:800}}>B</span></button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={()=>activeWrap("_","_")}><span className="mono" style={{fontStyle:"italic"}}>I</span></button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={()=>activeWrap("__","__")}><span className="mono" style={{textDecoration:"underline"}}>U</span></button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={()=>activeWrap("~~","~~")}><span className="mono" style={{textDecoration:"line-through"}}>S</span></button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={()=>activeWrap("==","==")}><span className="mono">HL</span></button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={()=>activePrefix("> ")}><span className="mono">❝</span></button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={()=>activePrefix("- ")}><span className="mono">•</span></button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={()=>activePrefix("1. ")}><span className="mono">1.</span></button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={()=>activeWrap("[size=sm]","[/size]")}><span className="mono">A-</span></button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={()=>activeWrap("[size=lg]","[/size]")}><span className="mono">A+</span></button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={()=>activeWrap("[color=#b8860b]","[/color]")} style={{color:"var(--gold)"}}>字色</button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={()=>activeWrap("[bg=#fde68a]","[/bg]")}>底色</button>
+              </div>
+            </div>
+            <textarea ref={responseRef} className="input" style={{minHeight:120,textAlign:"left"}} value={draft.response} onChange={e=>setDraft({...draft,response:e.target.value})} onFocus={()=>setActiveField("response")}/>
+            <div className="text-xs text-muted mt-6" style={{lineHeight:1.6}}>
+              支援：<span className="mono">**粗體**</span>、<span className="mono">_斜體_</span>、<span className="mono">__底線__</span>、<span className="mono">~~刪除線~~</span>、<span className="mono">==螢光==</span>、<span className="mono">&gt; 引用</span>、<span className="mono">- 清單</span>、<span className="mono">1. 編號</span>、<span className="mono">[color=#c0392b]字色[/color]</span>、<span className="mono">[bg=#fde68a]底色[/bg]</span>、<span className="mono">[size=lg]大字[/size]</span>
+            </div>
+          </div>
           <div className="flex items-center gap-8 mt-6"><input type="checkbox" id="star" checked={draft.star} onChange={e=>setDraft({...draft,star:e.target.checked})} style={{accentColor:var_gold}}/><label htmlFor="star" className="text-sm" style={{cursor:"pointer"}}>⭐ 置頂重點</label></div>
           <div className="flex gap-8 mt-12"><button className="btn btn-gold" onClick={save}>儲存</button><button className="btn btn-ghost" onClick={()=>setShowForm(false)}>取消</button></div>
         </Modal>
