@@ -580,8 +580,8 @@ const css = `
   .timeline-item:last-child{border-bottom:none}
   .timeline-item:hover{background:var(--bg3)}
   .tl-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;margin-top:5px}
-  .type-暖身{color:var(--blue)}.type-追蹤{color:var(--gold)}.type-規劃{color:var(--green)}.type-上線會議{color:var(--purple)}
-  .tl-dot.type-暖身{background:var(--blue)}.tl-dot.type-追蹤{background:var(--gold)}.tl-dot.type-規劃{background:var(--green)}.tl-dot.type-上線會議{background:var(--purple)}.tl-dot.type-談場{background:#c2410c}.tl-dot.type-團隊活動{background:#047857}.tl-dot.type-實體暖身{background:#4338ca}.tl-dot.type-產品課程{background:#6d28d9}
+  .type-暖身{color:var(--blue)}.type-追蹤{color:var(--gold)}.type-規劃{color:var(--green)}.type-上線會議{color:var(--purple)}.type-新人啟動{color:#0f766e}
+  .tl-dot.type-暖身{background:var(--blue)}.tl-dot.type-追蹤{background:var(--gold)}.tl-dot.type-規劃{background:var(--green)}.tl-dot.type-上線會議{background:var(--purple)}.tl-dot.type-談場{background:#c2410c}.tl-dot.type-團隊活動{background:#047857}.tl-dot.type-實體暖身{background:#4338ca}.tl-dot.type-產品課程{background:#6d28d9}.tl-dot.type-新人啟動{background:#0f766e}
   .status-badge{font-size:10px;padding:2px 6px;border-radius:4px;font-family:'DM Mono',monospace}
   .status-已完成{background:#d1fae5;color:#065f46}.status-待執行{background:var(--gold-light);color:var(--gold)}
 
@@ -618,6 +618,7 @@ const css = `
   .cal-event.type-團隊活動{background:#ecfdf5;color:#047857}
   .cal-event.type-實體暖身{background:#eef2ff;color:#4338ca}
   .cal-event.type-產品課程{background:#faf5ff;color:#6d28d9}
+  .cal-event.type-新人啟動{background:#f0fdfa;color:#0f766e}
 
   /* ── Partner detail tabs ── */
   .detail-tab{background:none;border:none;cursor:pointer;padding:8px 14px;font-family:'Noto Serif TC',serif;font-size:13px;color:var(--text2);border-bottom:2px solid transparent;transition:all .18s}
@@ -1080,6 +1081,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
   const [editData, setEditData] = useState(null);
   const [filter, setFilter] = useState("全部");
   const [sortBy, setSortBy] = useState("default");
+  const [nameQuery, setNameQuery] = useState("");
   const [fieldFilters, setFieldFilters] = useState({
     gender: "全部",
     region: "全部",
@@ -1112,6 +1114,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
   }, {});
   const filtered = nonUplines
     .filter(p => filter==="全部" ? true : p.role===filter)
+    .filter(p => String(p.name || "").toLowerCase().includes(nameQuery.trim().toLowerCase()))
     .filter(p => filterableFields.every(f => {
       const fv = fieldFilters[f.key];
       return fv === "全部" ? true : getFieldValue(p, f.key) === fv;
@@ -1380,6 +1383,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
           {filterGroups.map(r=><button key={r} className={`btn btn-sm ${filter===r?"btn-gold":"btn-ghost"}`} onClick={()=>setFilter(r)}>{r}</button>)}
         </div>
         <div className="partner-filters-row" style={{ justifyContent: "flex-end" }}>
+          <input className="input input-compact" style={{width:140,minWidth:140}} value={nameQuery} onChange={e=>setNameQuery(e.target.value)} placeholder="姓名搜尋"/>
           <select className="input input-compact" value={fieldFilters.gender} onChange={e=>setFieldFilters({...fieldFilters,gender:e.target.value})}>
             {(fieldOptions.gender || ["全部"]).map(v=><option key={v} value={v}>性別：{v}</option>)}
           </select>
@@ -1542,7 +1546,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             <div className="form-group"><label className="label">時間（時:分:秒）</label><input type="time" step="1" className="input" value={normalizeTime(interactionDraft.time)} onChange={e=>setInteractionDraft({...interactionDraft,time:e.target.value})}/></div>
             <div className="form-group"><label className="label">類型</label>
               <select className="input" value={interactionDraft.type} onChange={e=>setInteractionDraft({...interactionDraft,type:e.target.value})}>
-                {["暖身","追蹤","規劃","上線會議","談場","團隊活動","實體暖身","產品課程"].map(t=><option key={t}>{t}</option>)}
+                {["暖身","追蹤","規劃","上線會議","談場","團隊活動","實體暖身","產品課程","新人啟動"].map(t=><option key={t}>{t}</option>)}
               </select>
             </div>
           </div>
@@ -1805,10 +1809,14 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
   const sorted = [...calendarItems].sort(sortByNearToday);
   const filtered = filter==="全部"?sorted:filter==="待執行"?sorted.filter(i=>i.status==="待執行"):sorted.filter(i=>i.type===filter);
 
-  const openNew = () => { setEditData({id:uid(),date:new Date().toISOString().slice(0,10),time:nowHms(),partnerId:"",type:"暖身",title:"",content:"",status:"待執行",tags:"",partnerPlan:"",actionItems:"",quote:""}); setPartnerSearch(""); setShowForm(true); };
+  const openNew = () => { setEditData({id:uid(),date:new Date().toISOString().slice(0,10),time:nowHms(),partnerId:"",type:"暖身",title:"暖身",content:"",status:"待執行",tags:"",partnerPlan:"",actionItems:"",quote:""}); setPartnerSearch(""); setShowForm(true); };
   const saveItem = () => {
     const entry = { ...editData, time: normalizeTime(editData.time), tags: editData.tags ? editData.tags.split(/[、,，]/).map(t => t.trim()).filter(Boolean) : [] };
     if (entry.type === "上線會議") entry.actionItems = "";
+    if (!entry.partnerId) {
+      alert("請先選擇關聯夥伴，才能同步到互動紀錄。");
+      return;
+    }
     let next = interactions.find(i => i.id === entry.id) ? interactions.map(i => i.id === entry.id ? entry : i) : [...interactions, entry];
     if (entry.type === "上線會議") {
       next = removeInteractionsSyncedFromMeeting(next, entry.id);
@@ -1818,7 +1826,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
     if (editData.type === "上線會議" && isNewMeeting) {
       const lines = meetingPlanLinesForActions(entry.partnerPlan);
       if (lines.length) {
-        const newItems = lines.map(l => ({ id: uid(), date: editData.date, partnerId: "", type: "規劃", title: l, content: `來自上線會議「${editData.title}」的行動項目`, status: "待執行", tags: ["上線會議"], partnerPlan: "", actionItems: "", quote: "" }));
+        const newItems = lines.map(l => ({ id: uid(), date: editData.date, partnerId: entry.partnerId || "", type: "規劃", title: l, content: `來自上線會議「${editData.title}」的行動項目`, status: "待執行", tags: ["上線會議"], partnerPlan: "", actionItems: "", quote: "" }));
         next = [...next, ...newItems];
       }
     }
@@ -1896,7 +1904,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
       {view==="list"&&(
         <>
           <div className="flex gap-8 mb-14" style={{flexWrap:"wrap"}}>
-            {["全部","待執行","上線會議","暖身","追蹤","規劃","談場","團隊活動","實體暖身","產品課程"].map(f=><button key={f} className={`btn btn-sm ${filter===f?"btn-gold":"btn-ghost"}`} style={f==="上線會議"&&filter!==f?{borderColor:"#c4b5fd",color:"var(--purple)"}:{}} onClick={()=>setFilter(f)}>{f}</button>)}
+            {["全部","待執行","上線會議","暖身","追蹤","規劃","談場","團隊活動","實體暖身","產品課程","新人啟動"].map(f=><button key={f} className={`btn btn-sm ${filter===f?"btn-gold":"btn-ghost"}`} style={f==="上線會議"&&filter!==f?{borderColor:"#c4b5fd",color:"var(--purple)"}:{}} onClick={()=>setFilter(f)}>{f}</button>)}
           </div>
           <div className="card" style={{padding:0}}>
             {filtered.length===0&&<div className="empty">尚無紀錄</div>}
@@ -2074,12 +2082,31 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
             <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={editData.date} onChange={e=>setEditData({...editData,date:e.target.value})}/></div>
             <div className="form-group"><label className="label">時間（時:分:秒）</label><input type="time" step="1" className="input" value={normalizeTime(editData.time)} onChange={e=>setEditData({...editData,time:e.target.value})}/></div>
             <div className="form-group"><label className="label">類型</label>
-              <select className="input" value={editData.type} onChange={e=>setEditData({...editData,type:e.target.value,partnerId:e.target.value==="上線會議"?"":editData.partnerId})}>
-                {["暖身","追蹤","規劃","上線會議","談場","團隊活動","實體暖身","產品課程"].map(t=><option key={t}>{t}</option>)}
+              <select
+                className="input"
+                value={editData.type}
+                onChange={e=>setEditData(prev=>{
+                  const nextType = e.target.value;
+                  const isEditing = interactions.some(i => i.id === prev.id);
+                  const currentTitle = String(prev.title || "").trim();
+                  const shouldAutoFillTitle = !isEditing || !currentTitle || currentTitle === prev.type;
+                  return { ...prev, type: nextType, title: shouldAutoFillTitle ? nextType : prev.title };
+                })}
+              >
+                {["暖身","追蹤","規劃","上線會議","談場","團隊活動","實體暖身","產品課程","新人啟動"].map(t=><option key={t}>{t}</option>)}
               </select>
             </div>
           </div>
           <div className="form-group"><label className="label">標題 *</label><input className="input" value={editData.title} onChange={e=>setEditData({...editData,title:e.target.value})} placeholder={editData.type==="上線會議"?"例：04/05 與林佳蓉討論四月計畫":""}/>
+          </div>
+
+          <div className="form-group">
+            <label className="label">關聯夥伴</label>
+            <input className="input" value={partnerSearch} onChange={e=>setPartnerSearch(e.target.value)} placeholder="輸入姓名關鍵字篩選"/>
+            <select className="input mt-6" value={editData.partnerId} onChange={e=>setEditData({...editData,partnerId:e.target.value})}>
+              <option value="">請選擇關聯夥伴</option>
+              {filteredPartnerOptions.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
           </div>
 
           {/* 上線會議專屬欄位 */}
@@ -2094,14 +2121,6 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
             </div>
           ):(
             <>
-              <div className="form-group">
-                <label className="label">關聯夥伴</label>
-                <input className="input" value={partnerSearch} onChange={e=>setPartnerSearch(e.target.value)} placeholder="輸入姓名關鍵字篩選"/>
-                <select className="input mt-6" value={editData.partnerId} onChange={e=>setEditData({...editData,partnerId:e.target.value})}>
-                  <option value="">（無）</option>
-                  {filteredPartnerOptions.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-              </div>
               <div className="form-group"><label className="label">內容</label><textarea className="input" value={editData.content||""} onChange={e=>setEditData({...editData,content:e.target.value})}/></div>
             </>
           )}
