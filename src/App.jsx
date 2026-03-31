@@ -134,6 +134,7 @@ const SEED_MANIFEST = {
 // ─── Utils ────────────────────────────────────────────────────────
 const uid = () => Math.random().toString(36).slice(2, 9);
 const fmt = (d) => { try { return new Date(d + "T00:00:00").toLocaleDateString("zh-TW", { month: "short", day: "numeric" }); } catch { return d; } };
+const fmtFullDate = (d) => { try { return new Date(d + "T00:00:00").toLocaleDateString("zh-TW", { year: "numeric", month: "2-digit", day: "2-digit" }); } catch { return d; } };
 const dk = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 
 /** 人脈 CSV：第一列標題對應（Excel 另存 UTF-8 CSV，逗號或 TAB 皆可） */
@@ -1380,10 +1381,10 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
                   ["年齡", selected.age !== "" && selected.age != null ? String(selected.age) : ""],
                   ["職業", selected.occupation],
                   ["薪資", selected.salary != null && String(selected.salary).trim() !== "" ? String(selected.salary) : ""],
-                  ["加入名單", selected.joined ? fmt(selected.joined) : ""],
-                  ["談場", selected.dateTalkVenue ? fmt(selected.dateTalkVenue) : ""],
-                  ["團隊活動", selected.dateTeamActivity ? fmt(selected.dateTeamActivity) : ""],
-                  ["實體暖身", selected.dateWarmupPhysical ? fmt(selected.dateWarmupPhysical) : ""],
+                  ["加入名單", selected.joined ? fmtFullDate(selected.joined) : ""],
+                  ["談場", selected.dateTalkVenue ? fmtFullDate(selected.dateTalkVenue) : ""],
+                  ["團隊活動", selected.dateTeamActivity ? fmtFullDate(selected.dateTeamActivity) : ""],
+                  ["實體暖身", selected.dateWarmupPhysical ? fmtFullDate(selected.dateWarmupPhysical) : ""],
                 ].map(([l, v]) => (
                   <div key={l} className="info-row">
                     <div className="info-label">{l}</div>
