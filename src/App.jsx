@@ -536,6 +536,40 @@ function planLineSegmentSliceStart(line, dateMatchStart) {
   return dateMatchStart;
 }
 
+/** M/D 之後可選 (三) 或 （三） */
+function markerVisualEnd(line, marker) {
+  let end = marker.start + marker.length;
+  const head = line.slice(marker.start, end);
+  if (!/\d{1,2}\/\d{1,2}$/.test(head)) return end;
+  const rest = line.slice(end);
+  const wd = rest.match(/^\([一二三四五六日天]\)|^（[一二三四五六日天]）/);
+  if (wd) end += wd[0].length;
+  return end;
+}
+
+function onlyWhitespaceBetween(line, from, to) {
+  if (from > to) return false;
+  return !/[^\s]/.test(line.slice(from, to));
+}
+
+/** 開頭多個日期區塊僅以空白相隔時，最後一段日期之後的文字由各日期列共用 */
+function canUseSharedSuffixAfterDateRun(line, markers) {
+  if (markers.length < 2) return true;
+  for (let i = 0; i < markers.length - 1; i++) {
+    const a = markerVisualEnd(line, markers[i]);
+    const b = markers[i + 1].start;
+    if (!onlyWhitespaceBetween(line, a, b)) return false;
+  }
+  return true;
+}
+
+function partnerIdForPlanTitle(title, ordered) {
+  for (const p of ordered) {
+    if (p.name && title.includes(p.name)) return p.id;
+  }
+  return "";
+}
+
 /** 該行是否包含「可指定到某一天」的日期字樣（用于月曆：無則不擠在開會當日格子內） */
 function lineHasExplicitPlanDateInText(line) {
   const s = String(line || "");
@@ -590,23 +624,34 @@ function buildMeetingPlanLineEntries(meeting, partners) {
   };
 
   return lines.flatMap((line) => {
-    let partnerId = "";
-    for (const p of ordered) {
-      if (line.includes(p.name)) { partnerId = p.id; break; }
-    }
     const markers = collectAllPlanDateMarkers(line, meeting.date);
     if (markers.length === 0) {
-      return [oneEntry(line, partnerId)];
+      return [oneEntry(line, partnerIdForPlanTitle(line, ordered))];
     }
     const linePrefix = line.slice(0, markers[0].start);
     const chunks = [];
+
+    if (!linePrefix.trim() && canUseSharedSuffixAfterDateRun(line, markers)) {
+      const lastEnd = markerVisualEnd(line, markers[markers.length - 1]);
+      const commonSuffix = line.slice(lastEnd);
+      for (let i = 0; i < markers.length; i++) {
+        const blkStart = i === 0 ? markers[i].start : planLineSegmentSliceStart(line, markers[i].start);
+        const blkEnd = markerVisualEnd(line, markers[i]);
+        const dateHead = line.slice(blkStart, blkEnd).trimEnd();
+        if (!dateHead) continue;
+        const title = dateHead + commonSuffix;
+        chunks.push(oneEntry(title, partnerIdForPlanTitle(title, ordered)));
+      }
+      return chunks;
+    }
+
     for (let i = 0; i < markers.length; i++) {
       const segStart = i === 0 ? 0 : planLineSegmentSliceStart(line, markers[i].start);
       const segEnd = i < markers.length - 1 ? planLineSegmentSliceStart(line, markers[i + 1].start) : line.length;
       const segmentText = line.slice(segStart, segEnd).trim();
       if (!segmentText) continue;
       const title = i === 0 ? segmentText : `${linePrefix}${segmentText}`;
-      chunks.push(oneEntry(title, partnerId));
+      chunks.push(oneEntry(title, partnerIdForPlanTitle(title, ordered)));
     }
     return chunks;
   });
