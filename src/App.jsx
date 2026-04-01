@@ -433,7 +433,66 @@ function getUnmatchedMeetingPlanLines(planText, partners) {
   return lines.filter(line => !ordered.some(p => line.includes(p.name)));
 }
 
-/** 上線會議：具體規劃與待辦「一行一項」各建立一筆規劃互動；行內含人脈姓名則掛該夥伴，否則為個人行程（無夥伴） */
+function isValidYmdParts(y, m, d) {
+  const dt = new Date(y, m - 1, d);
+  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+}
+
+function partsToYmd(y, m, d) {
+  if (!isValidYmdParts(y, m, d)) return null;
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+/** 從待辦行解析日期：支援 YYYY-MM-DD、M/D、M月初；解析不到則用會議日 */
+function parsePlanLineDate(line, meetingDateYmd) {
+  const fallback = meetingDateYmd;
+  if (!line || !/^\d{4}-\d{2}-\d{2}$/.test(String(meetingDateYmd || ""))) return fallback;
+  const y = +meetingDateYmd.slice(0, 4);
+  const meetingM = +meetingDateYmd.slice(5, 7);
+  const s = String(line);
+
+  const iso = s.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+  if (iso) {
+    const out = partsToYmd(+iso[1], +iso[2], +iso[3]);
+    if (out) return out;
+  }
+
+  const chu = s.match(/(\d{1,2})月\s*初/);
+  if (chu) {
+    let mm = +chu[1];
+    let yy = y;
+    if (mm < meetingM) yy += 1;
+    const out = partsToYmd(yy, mm, 1);
+    if (out) return out;
+  }
+
+  const md = s.match(/\b(\d{1,2})\/(\d{1,2})\b/);
+  if (md) {
+    let mm = +md[1];
+    let dd = +md[2];
+    let yy = y;
+    if (mm < meetingM) yy += 1;
+    const out = partsToYmd(yy, mm, dd);
+    if (out) return out;
+  }
+
+  return fallback;
+}
+
+/** 依行內關鍵字推斷互動類型（月曆分類／篩選用） */
+function inferPlanLineInteractionType(line) {
+  const s = String(line || "");
+  if (s.includes("團隊活動")) return "團隊活動";
+  if (s.includes("談場")) return "談場";
+  if (s.includes("實體暖身")) return "實體暖身";
+  if (s.includes("產品課程")) return "產品課程";
+  if (s.includes("新人啟動")) return "新人啟動";
+  if (/約暖身|暖身/.test(s)) return "暖身";
+  if (s.includes("追蹤")) return "追蹤";
+  return "規劃";
+}
+
+/** 上線會議：具體規劃與待辦「一行一項」各建立一筆互動；日期由行內解析；行內含人脈姓名則掛該夥伴 */
 function buildMeetingPlanLineEntries(meeting, partners) {
   if (meeting.type !== "上線會議") return [];
   const plan = String(mergeMeetingPlanFields(meeting.partnerPlan, meeting.actionItems)).trim();
@@ -443,18 +502,19 @@ function buildMeetingPlanLineEntries(meeting, partners) {
   const ordered = [...pool].sort((a, b) => b.name.length - a.name.length);
   const titleBase = meeting.title || "上線會議";
   const prefix = `來自上線會議「${titleBase}」的行動項目`;
-  const t = meeting.time != null && String(meeting.time).trim() !== "" ? normalizeTime(meeting.time) : "00:00:00";
   return lines.map(line => {
     let partnerId = "";
     for (const p of ordered) {
       if (line.includes(p.name)) { partnerId = p.id; break; }
     }
+    const lineDate = parsePlanLineDate(line, meeting.date);
+    const lineType = inferPlanLineInteractionType(line);
     return {
       id: uid(),
-      date: meeting.date,
-      time: t,
+      date: lineDate,
+      time: "00:00:00",
       partnerId,
-      type: "規劃",
+      type: lineType,
       title: line,
       content: prefix,
       status: meeting.status === "已完成" ? "已完成" : "待執行",
@@ -1629,7 +1689,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             <>
               <div className="form-group"><label className="label">討論主題 / 結論</label><textarea className="input" style={{minHeight:80}} value={interactionDraft.content||""} onChange={e=>setInteractionDraft({...interactionDraft,content:e.target.value})}/></div>
               <div className="form-group"><label className="label">具體規劃與待辦（一行一項）</label><textarea className="input" style={{minHeight:120,fontFamily:"'DM Mono',monospace",fontSize:12}} value={interactionDraft.partnerPlan||""} onChange={e=>setInteractionDraft({...interactionDraft,partnerPlan:e.target.value})} placeholder={"王思涵：本週約談場\n幫陳威宇整理獎金說明"}/>
-                <div className="text-xs text-muted mt-6" style={{lineHeight:1.6}}>上線會議主紀錄不綁定單一夥伴；每行會成為一筆待執行「規劃」。行內含人脈「姓名」（須與人脈網絡相同）者會掛到該夥伴，否則為個人行程。計畫中有出現本夥伴姓名時，該筆會議也會列在這裡。</div>
+                <div className="text-xs text-muted mt-6" style={{lineHeight:1.6}}>上線會議主紀錄不綁定單一夥伴；每行會成為一筆互動（依內容自動分類）。行內日期可用「4/7」「YYYY-MM-DD」「5月初」等，子筆落在該日；含人脈「姓名」（須與人脈網絡相同）者掛該夥伴，否則為個人行程。計畫中有出現本夥伴姓名時，該筆會議也會列在夥伴頁。</div>
               </div>
               <div className="form-group"><label className="label">上線金句 / 激勵話語</label><input className="input" value={interactionDraft.quote||""} onChange={e=>setInteractionDraft({...interactionDraft,quote:e.target.value})}/></div>
             </>
@@ -1913,7 +1973,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
   const calendarItems = [...interactions, ...partnerScheduleItems];
   const filteredItems = filter==="全部"?calendarItems:filter==="待執行"?calendarItems.filter(i=>i.status==="待執行"):calendarItems.filter(i=>i.type===filter);
   /** 由上線會議「具體規劃」拆出的子筆規劃：月曆格子仍顯示，本月紀錄不重複列出 */
-  const isDerivedMeetingPlanLine = (i) => i.type === "規劃" && i.fromMeetingId;
+  const isDerivedMeetingPlanLine = (i) => i.fromMeetingId != null && String(i.fromMeetingId).trim() !== "";
   const timelineListItems = filteredItems.filter(i => !isDerivedMeetingPlanLine(i));
 
   const TIMELINE_STAT_TYPES = ["上線會議", "暖身", "追蹤", "規劃", "談場", "團隊活動", "實體暖身", "產品課程", "新人啟動"];
@@ -2222,7 +2282,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
               <div className="subheading" style={{color:"var(--purple)",marginBottom:10}}>🟣 上線會議專屬紀錄</div>
               <div className="form-group"><label className="label">討論主題 / 結論</label><textarea className="input" style={{minHeight:80}} value={editData.content||""} onChange={e=>setEditData({...editData,content:e.target.value})} placeholder="今天討論了什麼？結論是什麼？"/></div>
               <div className="form-group"><label className="label">具體規劃與待辦（一行一項）</label><textarea className="input" style={{minHeight:120,fontFamily:"'DM Mono',monospace",fontSize:12}} value={editData.partnerPlan||""} onChange={e=>setEditData({...editData,partnerPlan:e.target.value})} placeholder={"王思涵：本週約談場\n幫陳威宇整理獎金說明"}/>
-                <div className="text-xs text-muted mt-6" style={{lineHeight:1.6}}>上線會議不綁定關聯夥伴；每行會成為一筆待執行「規劃」。行內含人脈姓名者會掛到該夥伴互動，否則為個人行程（仍顯示於時間軸／月曆）。</div>
+                <div className="text-xs text-muted mt-6" style={{lineHeight:1.6}}>上線會議不綁定關聯夥伴；每行會成為一筆互動（依內容自動分類，如暖身／談場／團隊活動等）。行內日期支援「4/7」「YYYY-MM-DD」「5月初」等，子筆會落在該日；含人脈姓名者掛該夥伴，否則為個人行程。</div>
               </div>
               <div className="form-group"><label className="label">上線給的金句 / 激勵話語</label><input className="input" value={editData.quote||""} onChange={e=>setEditData({...editData,quote:e.target.value})} placeholder="例：做不到不是能力問題，是還沒找到對的方式"/></div>
             </div>
