@@ -487,6 +487,15 @@ function parsePlanLineDate(line, meetingDateYmd) {
   return fallback;
 }
 
+/** 該行是否包含「可指定到某一天」的日期字樣（用于月曆：無則不擠在開會當日格子內） */
+function lineHasExplicitPlanDateInText(line) {
+  const s = String(line || "");
+  if (/\b(\d{4})-(\d{2})-(\d{2})\b/.test(s)) return true;
+  if (/(\d{1,2})月\s*初/.test(s)) return true;
+  if (/\b(\d{1,2})\/(\d{1,2})\b/.test(s)) return true;
+  return false;
+}
+
 /** 依行內關鍵字推斷互動類型（月曆分類／篩選用） */
 function inferPlanLineInteractionType(line) {
   const s = String(line || "");
@@ -1720,7 +1729,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             <>
               <div className="form-group"><label className="label">討論主題 / 結論</label><textarea className="input" style={{minHeight:80}} value={interactionDraft.content||""} onChange={e=>setInteractionDraft({...interactionDraft,content:e.target.value})}/></div>
               <div className="form-group"><label className="label">具體規劃與待辦（一行一項）</label><textarea className="input" style={{minHeight:120,fontFamily:"'DM Mono',monospace",fontSize:12}} value={interactionDraft.partnerPlan||""} onChange={e=>setInteractionDraft({...interactionDraft,partnerPlan:e.target.value})} placeholder={"王思涵：本週約談場\n幫陳威宇整理獎金說明"}/>
-                <div className="text-xs text-muted mt-6" style={{lineHeight:1.6}}>上線會議主紀錄不綁定單一夥伴；每行會成為一筆互動（依內容自動分類）。行內日期可用「4/7」「YYYY-MM-DD」「5月初」等，子筆落在該日；含人脈「姓名」（須與人脈網絡相同）者掛該夥伴，否則為個人行程。計畫中有出現本夥伴姓名時，該筆會議也會列在夥伴頁。</div>
+                <div className="text-xs text-muted mt-6" style={{lineHeight:1.6}}>上線會議主紀錄不綁定單一夥伴；每行會成為一筆互動（依內容自動分類）。行內日期可用「4/7」「YYYY-MM-DD」「5月初」等，子筆落在該日並顯示在月曆；未寫日期者仍同步到人脈，但不進月曆（避免開會當日重複一堆拆筆）。含人脈「姓名」者掛該夥伴。</div>
               </div>
               <div className="form-group"><label className="label">上線金句 / 激勵話語</label><input className="input" value={interactionDraft.quote||""} onChange={e=>setInteractionDraft({...interactionDraft,quote:e.target.value})}/></div>
             </>
@@ -2002,9 +2011,15 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
       } : null,
     ])).filter(Boolean)
     .filter(it => !interactionScheduleSet.has(`${it.partnerId}|${it.type}|${it.date}`));
-  const calendarItems = [...interactions, ...partnerScheduleItems];
+  /** 月曆：上線會議主紀錄留在開會當日；拆筆僅在它們含「M/D」等明確日期時才出現在對應日期，未寫日期的子筆不堆在開會當日（仍保留在人脈互動／資料） */
+  const calendarInteractionRows = interactions.filter((i) => {
+    const fid = i.fromMeetingId != null && String(i.fromMeetingId).trim() !== "";
+    if (!fid) return true;
+    return lineHasExplicitPlanDateInText(i.title || "");
+  });
+  const calendarItems = [...calendarInteractionRows, ...partnerScheduleItems];
   const filteredItems = filter==="全部"?calendarItems:filter==="待執行"?calendarItems.filter(i=>i.status==="待執行"):calendarItems.filter(i=>i.type===filter);
-  /** 由上線會議「具體規劃」拆出的子筆規劃：月曆格子仍顯示，本月紀錄不重複列出 */
+  /** 由上線會議拆出的子筆：下方「本月紀錄」不重複列出 */
   const isDerivedMeetingPlanLine = (i) => i.fromMeetingId != null && String(i.fromMeetingId).trim() !== "";
   const timelineListItems = filteredItems.filter(i => !isDerivedMeetingPlanLine(i));
 
@@ -2359,7 +2374,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
               <div className="subheading" style={{color:"var(--purple)",marginBottom:10}}>🟣 上線會議專屬紀錄</div>
               <div className="form-group"><label className="label">討論主題 / 結論</label><textarea className="input" style={{minHeight:80}} value={editData.content||""} onChange={e=>setEditData({...editData,content:e.target.value})} placeholder="今天討論了什麼？結論是什麼？"/></div>
               <div className="form-group"><label className="label">具體規劃與待辦（一行一項）</label><textarea className="input" style={{minHeight:120,fontFamily:"'DM Mono',monospace",fontSize:12}} value={editData.partnerPlan||""} onChange={e=>setEditData({...editData,partnerPlan:e.target.value})} placeholder={"王思涵：本週約談場\n幫陳威宇整理獎金說明"}/>
-                <div className="text-xs text-muted mt-6" style={{lineHeight:1.6}}>上線會議不綁定關聯夥伴；每行會成為一筆互動（依內容自動分類，如暖身／談場／團隊活動等）。行內日期支援「4/7」「YYYY-MM-DD」「5月初」等，子筆會落在該日；含人脈姓名者掛該夥伴，否則為個人行程。</div>
+                <div className="text-xs text-muted mt-6" style={{lineHeight:1.6}}>上線會議不綁定關聯夥伴；每行會成為一筆互動（依內容自動分類）。行內日期支援「4/7」「YYYY-MM-DD」「5月初」等，有日期者會出現在月曆對應日；未寫日期者仍會同步到人脈但不進月曆，開會當日僅顯示主紀錄。</div>
               </div>
               <div className="form-group"><label className="label">上線給的金句 / 激勵話語</label><input className="input" value={editData.quote||""} onChange={e=>setEditData({...editData,quote:e.target.value})} placeholder="例：做不到不是能力問題，是還沒找到對的方式"/></div>
             </div>
