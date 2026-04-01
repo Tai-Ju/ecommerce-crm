@@ -1837,7 +1837,6 @@ function CostSection({ partner, onUpdate }) {
 
 // ─── Timeline ─────────────────────────────────────────────────────
 function Timeline({ interactions, setInteractions, partners, setPartners }) {
-  const [view, setView] = useState("list");
   const [filter, setFilter] = useState("全部");
   const [showForm, setShowForm] = useState(false);
   const [editData, setEditData] = useState(null);
@@ -1913,10 +1912,25 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
     .filter(it => !interactionScheduleSet.has(`${it.partnerId}|${it.type}|${it.date}`));
   const calendarItems = [...interactions, ...partnerScheduleItems];
   const filteredItems = filter==="全部"?calendarItems:filter==="待執行"?calendarItems.filter(i=>i.status==="待執行"):calendarItems.filter(i=>i.type===filter);
-  /** 由上線會議「具體規劃」拆出的子筆規劃：月曆格子仍顯示，列表／本月紀錄不重複列出 */
+  /** 由上線會議「具體規劃」拆出的子筆規劃：月曆格子仍顯示，本月紀錄不重複列出 */
   const isDerivedMeetingPlanLine = (i) => i.type === "規劃" && i.fromMeetingId;
   const timelineListItems = filteredItems.filter(i => !isDerivedMeetingPlanLine(i));
-  const sorted = [...timelineListItems].sort(sortByNearToday);
+
+  const TIMELINE_STAT_TYPES = ["上線會議", "暖身", "追蹤", "規劃", "談場", "團隊活動", "實體暖身", "產品課程", "新人啟動"];
+  const monthStatsPrefix = `${calMonth.y}-${String(calMonth.m + 1).padStart(2, "0")}`;
+  const monthStatsItems = calendarItems.filter(i => i.date && String(i.date).startsWith(monthStatsPrefix));
+  const monthTypeCounts = monthStatsItems.reduce((acc, i) => {
+    const t = i.type || "其他";
+    acc[t] = (acc[t] || 0) + 1;
+    return acc;
+  }, {});
+  const monthStatsDisplay = [
+    ...TIMELINE_STAT_TYPES.filter((t) => (monthTypeCounts[t] || 0) > 0).map((t) => ({ type: t, count: monthTypeCounts[t] })),
+    ...Object.keys(monthTypeCounts)
+      .filter((t) => !TIMELINE_STAT_TYPES.includes(t) && monthTypeCounts[t] > 0)
+      .sort((a, b) => a.localeCompare(b, "zh-Hant"))
+      .map((t) => ({ type: t, count: monthTypeCounts[t] })),
+  ];
 
   const openNew = () => { setEditData({id:uid(),date:new Date().toISOString().slice(0,10),time:nowHms(),partnerId:"",type:"暖身",title:"暖身",content:"",status:"待執行",tags:"",partnerPlan:"",actionItems:"",quote:""}); setPartnerSearch(""); setShowForm(true); };
   const saveItem = () => {
@@ -2000,47 +2014,31 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-14">
-        <h2 className="heading" style={{margin:0}}>互動時間軸</h2>
-        <div className="flex gap-8">
-          <button className={`btn btn-sm ${view==="list"?"btn-gold":"btn-ghost"}`} onClick={()=>setView("list")}>列表</button>
-          <button className={`btn btn-sm ${view==="cal"?"btn-gold":"btn-ghost"}`} onClick={()=>setView("cal")}>📅 月曆</button>
+      <div className="flex items-start justify-between mb-14" style={{ gap: 16 }}>
+        <div style={{ minWidth: 0 }}>
+          <h2 className="heading" style={{ margin: 0 }}>互動時間軸</h2>
+          <div className="text-sm mt-8" style={{ color: "var(--text2)", lineHeight: 1.7 }}>
+            <span className="text-muted" style={{ fontSize: 12, marginRight: 10 }}>{calMonth.y} 年 {calMonth.m + 1} 月 · 分類統計</span>
+            {monthStatsDisplay.length === 0 ? (
+              <span className="text-muted" style={{ fontSize: 12 }}>尚無紀錄</span>
+            ) : (
+              <span style={{ display: "inline-flex", flexWrap: "wrap", gap: "6px 14px", alignItems: "center" }}>
+                {monthStatsDisplay.map(({ type, count }) => (
+                  <span key={type} style={{ fontFamily: "'DM Mono', monospace", fontSize: 13, whiteSpace: "nowrap" }}>
+                    {type} <span style={{ color: "var(--gold)", fontWeight: 700 }}>{count}</span>
+                  </span>
+                ))}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex gap-8" style={{ flexShrink: 0 }}>
           <button className="btn btn-gold btn-sm" onClick={openNew}>＋ 新增</button>
         </div>
       </div>
 
-      {/* List view */}
-      {view==="list"&&(
-        <>
-          <div className="card" style={{padding:0}}>
-            {sorted.length===0&&<div className="empty">尚無紀錄</div>}
-            {sorted.map(item=>{
-              const p=getP(item.partnerId);
-              return (
-                <div key={item.id} className="timeline-item" onClick={()=>setSelected(item)}>
-                  <div className={`tl-dot type-${item.type}`}/>
-                  <div style={{flex:1}}>
-                    <div className="flex items-center gap-6" style={{flexWrap:"wrap"}}>
-                      <span style={{fontWeight:600,fontSize:14}}>{item.title}</span>
-                        {!item.isPartnerSchedule && <span className={`status-badge status-${item.status}`}>{item.status}</span>}
-                      <span className="tag">{item.type}</span>
-                    </div>
-                    {p&&<div className="flex items-center gap-6 mt-4"><div className="avatar" style={{width:18,height:18,fontSize:9}}>{p.avatar}</div><span className="text-xs text-muted">{p.name}</span></div>}
-                    {item.content&&<div className="text-sm text-muted mt-4" style={{lineHeight:1.6}}>{item.content}</div>}
-                      {item.isPartnerSchedule&&<div className="text-xs text-muted mt-4">來源：人脈基本資料日期欄位</div>}
-                    <div className="text-xs mono" style={{color:"var(--text3)",marginTop:3}}>{item.date} {normalizeTime(item.time)}</div>
-                  </div>
-                    {!item.isPartnerSchedule && <button className={`btn btn-sm ${item.status==="已完成"?"btn-gold":"btn-ghost"}`} style={{flexShrink:0,alignSelf:"flex-start"}} onClick={e=>{e.stopPropagation();toggle(item.id);}}>{item.status==="已完成"?"✓":"○"}</button>}
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-
-      {/* Calendar view — shows events + mini list below */}
-      {view==="cal"&&(
-        <div>
+      {/* 月曆（唯一檢視）：分類篩選 + 格線 + 本月紀錄 */}
+      <div>
           <div className="flex gap-8 mb-14" style={{flexWrap:"wrap"}}>
             {["全部","待執行","上線會議","暖身","追蹤","規劃","談場","團隊活動","實體暖身","產品課程","新人啟動"].map(f=><button key={f} className={`btn btn-sm ${filter===f?"btn-gold":"btn-ghost"}`} style={f==="上線會議"&&filter!==f?{borderColor:"#c4b5fd",color:"var(--purple)"}:{}} onClick={()=>setFilter(f)}>{f}</button>)}
           </div>
@@ -2083,7 +2081,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
               );
             })}
           </div>
-          {/* This month list below calendar（與列表相同：不列出上線會議拆出的子筆規劃，避免與主紀錄重複） */}
+          {/* 本月紀錄：不列出上線會議拆出的子筆規劃，避免與主紀錄重複 */}
           <div className="subheading">本月紀錄</div>
           <div className="card" style={{padding:0}}>
             {(() => {
@@ -2109,8 +2107,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
               });
             })()}
           </div>
-        </div>
-      )}
+      </div>
 
       {/* Detail modal */}
       {selected&&(
