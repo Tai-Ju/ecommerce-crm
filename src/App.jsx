@@ -579,6 +579,8 @@ const css = `
   /* ── Cards ── */
   .card{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}
   .card-sm{background:var(--bg3);border:1px solid var(--border);border-radius:9px;padding:13px}
+  /* 上線會議「具體規劃與待辦」：靠左、保留換行 */
+  .meeting-plan-read{text-align:left;white-space:pre-wrap;word-break:break-word;line-height:1.8}
   .card-gold{background:var(--gold-light);border:1px solid var(--gold-border);border-radius:var(--radius);padding:18px}
 
   /* ── Grid ── */
@@ -660,7 +662,7 @@ const css = `
 
   /* ── Modal ── */
   .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);backdrop-filter:blur(3px);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px}
-  .modal{background:#fff;border:1.5px solid var(--border2);border-radius:16px;width:100%;max-width:540px;max-height:90vh;overflow-y:auto;padding:24px;box-shadow:0 8px 40px rgba(0,0,0,.14)}
+  .modal{background:#fff;border:1.5px solid var(--border2);border-radius:16px;width:100%;max-width:540px;max-height:90vh;overflow-y:auto;padding:24px;box-shadow:0 8px 40px rgba(0,0,0,.14);text-align:left}
   .modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
   .close-btn{background:none;border:none;color:var(--text3);cursor:pointer;font-size:18px;padding:4px;border-radius:4px}.close-btn:hover{background:var(--bg3)}
 
@@ -1656,7 +1658,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
                     <div className="text-xs mono text-muted mt-3">{i.date} {normalizeTime(i.time)} · {i.type}</div>
                     {i.content&&<div className="text-sm text-muted mt-4" style={{lineHeight:1.7}}>{i.content}</div>}
                     {i.type==="上線會議"&&mergeMeetingPlanFields(i.partnerPlan,i.actionItems)&&(
-                      <div className="text-sm text-muted mt-4" style={{lineHeight:1.7,whiteSpace:"pre-wrap"}}><span className="label" style={{display:"block",marginBottom:4}}>具體規劃與待辦</span>{mergeMeetingPlanFields(i.partnerPlan,i.actionItems)}</div>
+                      <div className="text-sm text-muted mt-4 meeting-plan-read"><span className="label" style={{display:"block",marginBottom:4}}>具體規劃與待辦</span>{mergeMeetingPlanFields(i.partnerPlan,i.actionItems)}</div>
                     )}
                   </div>
                   <div style={{display:"flex",flexDirection:"column",gap:8,alignItems:"flex-end",flexShrink:0}}>
@@ -2176,14 +2178,14 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
             {!selected.isPartnerSchedule && <span className={`status-badge status-${selected.status}`}>{selected.status}</span>}
             <span className="tag" style={selected.type==="上線會議"?{background:"#f5f3ff",borderColor:"#c4b5fd",color:"var(--purple)"}:{}}>{selected.type}</span>
           </div>
-          {selected.content&&<div className="text-sm" style={{lineHeight:1.8}}>{selected.content}</div>}
+          {selected.content&&<div className={`text-sm${selected.type==="上線會議"?" meeting-plan-read":""}`} style={selected.type==="上線會議"?undefined:{lineHeight:1.8}}>{selected.content}</div>}
           {selected.isPartnerSchedule&&(
             <div className="text-sm text-muted" style={{lineHeight:1.7}}>
               來源：人脈基本資料日期欄位
             </div>
           )}
           {selected.type==="上線會議"&&mergeMeetingPlanFields(selected.partnerPlan, selected.actionItems)&&(
-            <div className="card-sm mt-10"><div className="label">具體規劃與待辦</div><div className="text-sm mt-5" style={{lineHeight:1.8,whiteSpace:"pre-wrap"}}>{mergeMeetingPlanFields(selected.partnerPlan, selected.actionItems)}</div></div>
+            <div className="card-sm mt-10" style={{textAlign:"left"}}><div className="label">具體規劃與待辦</div><div className="text-sm mt-5 meeting-plan-read">{mergeMeetingPlanFields(selected.partnerPlan, selected.actionItems)}</div></div>
           )}
           {selected.type==="上線會議"&&selected.quote&&(
             <div style={{background:"#f5f3ff",border:"1px solid #c4b5fd",borderRadius:8,padding:"10px 14px",marginTop:10}}>
