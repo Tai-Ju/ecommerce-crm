@@ -1913,7 +1913,10 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
     .filter(it => !interactionScheduleSet.has(`${it.partnerId}|${it.type}|${it.date}`));
   const calendarItems = [...interactions, ...partnerScheduleItems];
   const filteredItems = filter==="全部"?calendarItems:filter==="待執行"?calendarItems.filter(i=>i.status==="待執行"):calendarItems.filter(i=>i.type===filter);
-  const sorted = [...filteredItems].sort(sortByNearToday);
+  /** 由上線會議「具體規劃」拆出的子筆規劃：月曆格子仍顯示，列表／本月紀錄不重複列出 */
+  const isDerivedMeetingPlanLine = (i) => i.type === "規劃" && i.fromMeetingId;
+  const timelineListItems = filteredItems.filter(i => !isDerivedMeetingPlanLine(i));
+  const sorted = [...timelineListItems].sort(sortByNearToday);
 
   const openNew = () => { setEditData({id:uid(),date:new Date().toISOString().slice(0,10),time:nowHms(),partnerId:"",type:"暖身",title:"暖身",content:"",status:"待執行",tags:"",partnerPlan:"",actionItems:"",quote:""}); setPartnerSearch(""); setShowForm(true); };
   const saveItem = () => {
@@ -2080,20 +2083,14 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
               );
             })}
           </div>
-          {/* This month list below calendar */}
+          {/* This month list below calendar（與列表相同：不列出上線會議拆出的子筆規劃，避免與主紀錄重複） */}
           <div className="subheading">本月紀錄</div>
           <div className="card" style={{padding:0}}>
-            {Object.keys(iMap)
-              .filter(k=>k.startsWith(`${calMonth.y}-${String(calMonth.m+1).padStart(2,"0")}`))
-              .sort((a,b)=>a.localeCompare(b))
-              .flatMap(k=>[...(iMap[k]||[])].sort((a,b)=>{
-                const todayMs = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00").getTime();
-                const da = Math.abs(toMsDT(a.date, a.time) - todayMs);
-                const db = Math.abs(toMsDT(b.date, b.time) - todayMs);
-                if (da !== db) return da - db;
-                return toMsDT(b.date, b.time) - toMsDT(a.date, a.time);
-              }))
-              .map(item=>{
+            {(() => {
+              const monthPrefix = `${calMonth.y}-${String(calMonth.m+1).padStart(2,"0")}`;
+              const monthRows = [...timelineListItems].filter(i => i.date.startsWith(monthPrefix)).sort(sortByNearToday);
+              if (monthRows.length === 0) return <div className="empty">本月尚無紀錄</div>;
+              return monthRows.map(item=>{
                 const p=getP(item.partnerId);
                 return (
                   <div key={item.id} className="timeline-item" onClick={()=>setSelected(item)}>
@@ -2109,8 +2106,8 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
                     {!item.isPartnerSchedule && <button className={`btn btn-sm ${item.status==="已完成"?"btn-gold":"btn-ghost"}`} style={{flexShrink:0,alignSelf:"flex-start"}} onClick={e=>{e.stopPropagation();toggle(item.id);}}>{item.status==="已完成"?"✓":"○"}</button>}
                   </div>
                 );
-              })}
-            {!Object.keys(iMap).some(k=>k.startsWith(`${calMonth.y}-${String(calMonth.m+1).padStart(2,"0")}`))&&<div className="empty">本月尚無紀錄</div>}
+              });
+            })()}
           </div>
         </div>
       )}
