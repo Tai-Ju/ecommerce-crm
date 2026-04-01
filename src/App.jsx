@@ -487,6 +487,55 @@ function parsePlanLineDate(line, meetingDateYmd) {
   return fallback;
 }
 
+/** M/D 配對會議年月的年份補正（與 parsePlanLineDate 一致） */
+function mdYmdFromParts(mm, dd, meetingDateYmd) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(meetingDateYmd || ""))) return null;
+  const y = +meetingDateYmd.slice(0, 4);
+  const meetingM = +meetingDateYmd.slice(5, 7);
+  let yy = y;
+  if (mm < meetingM) yy += 1;
+  return partsToYmd(yy, mm, dd);
+}
+
+/** 一行內所有日期標記（位置由前到後），供多日期切段 */
+function collectAllPlanDateMarkers(line, meetingDateYmd) {
+  const s = String(line);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(meetingDateYmd || ""))) return [];
+  const out = [];
+  const seenStart = new Set();
+  const add = (start, len, ymd) => {
+    if (ymd == null || seenStart.has(start)) return;
+    seenStart.add(start);
+    out.push({ start, length: len, ymd });
+  };
+  let m;
+  const isoRe = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
+  while ((m = isoRe.exec(s)) !== null) {
+    add(m.index, m[0].length, partsToYmd(+m[1], +m[2], +m[3]));
+  }
+  const chuRe = /(\d{1,2})月\s*初/g;
+  while ((m = chuRe.exec(s)) !== null) {
+    const mm = +m[1];
+    const y = +meetingDateYmd.slice(0, 4);
+    const meetingM = +meetingDateYmd.slice(5, 7);
+    let yy = y;
+    if (mm < meetingM) yy += 1;
+    add(m.index, m[0].length, partsToYmd(yy, mm, 1));
+  }
+  const mdRe = /\b(\d{1,2})\/(\d{1,2})\b/g;
+  while ((m = mdRe.exec(s)) !== null) {
+    add(m.index, m[0].length, mdYmdFromParts(+m[1], +m[2], meetingDateYmd));
+  }
+  out.sort((a, b) => a.start - b.start);
+  return out;
+}
+
+/** 切段起點：若緊貼在「再約」前可一併納入（再約4/20） */
+function planLineSegmentSliceStart(line, dateMatchStart) {
+  if (dateMatchStart >= 2 && line.slice(dateMatchStart - 2, dateMatchStart) === "再約") return dateMatchStart - 2;
+  return dateMatchStart;
+}
+
 /** 該行是否包含「可指定到某一天」的日期字樣（用于月曆：無則不擠在開會當日格子內） */
 function lineHasExplicitPlanDateInText(line) {
   const s = String(line || "");
@@ -509,7 +558,7 @@ function inferPlanLineInteractionType(line) {
   return "規劃";
 }
 
-/** 上線會議：具體規劃與待辦「一行一項」各建立一筆互動；日期由行內解析；行內含人脈姓名則掛該夥伴 */
+/** 上線會議拆筆：一行可含多個日期 → 依日期切段各一筆；首段保留原前綴（如 琪琪約暖身:） */
 function buildMeetingPlanLineEntries(meeting, partners) {
   if (meeting.type !== "上線會議") return [];
   const plan = String(mergeMeetingPlanFields(meeting.partnerPlan, meeting.actionItems)).trim();
@@ -519,20 +568,17 @@ function buildMeetingPlanLineEntries(meeting, partners) {
   const ordered = [...pool].sort((a, b) => b.name.length - a.name.length);
   const titleBase = meeting.title || "上線會議";
   const prefix = `來自上線會議「${titleBase}」的行動項目`;
-  return lines.map(line => {
-    let partnerId = "";
-    for (const p of ordered) {
-      if (line.includes(p.name)) { partnerId = p.id; break; }
-    }
-    const lineDate = parsePlanLineDate(line, meeting.date);
-    const lineType = inferPlanLineInteractionType(line);
+
+  const oneEntry = (title, partnerId) => {
+    const lineDate = parsePlanLineDate(title, meeting.date);
+    const lineType = inferPlanLineInteractionType(title);
     return {
       id: uid(),
       date: lineDate,
       time: "00:00:00",
       partnerId,
       type: lineType,
-      title: line,
+      title,
       content: prefix,
       status: meeting.status === "已完成" ? "已完成" : "待執行",
       tags: ["上線會議"],
@@ -541,6 +587,28 @@ function buildMeetingPlanLineEntries(meeting, partners) {
       quote: "",
       fromMeetingId: meeting.id,
     };
+  };
+
+  return lines.flatMap((line) => {
+    let partnerId = "";
+    for (const p of ordered) {
+      if (line.includes(p.name)) { partnerId = p.id; break; }
+    }
+    const markers = collectAllPlanDateMarkers(line, meeting.date);
+    if (markers.length === 0) {
+      return [oneEntry(line, partnerId)];
+    }
+    const linePrefix = line.slice(0, markers[0].start);
+    const chunks = [];
+    for (let i = 0; i < markers.length; i++) {
+      const segStart = i === 0 ? 0 : planLineSegmentSliceStart(line, markers[i].start);
+      const segEnd = i < markers.length - 1 ? planLineSegmentSliceStart(line, markers[i + 1].start) : line.length;
+      const segmentText = line.slice(segStart, segEnd).trim();
+      if (!segmentText) continue;
+      const title = i === 0 ? segmentText : `${linePrefix}${segmentText}`;
+      chunks.push(oneEntry(title, partnerId));
+    }
+    return chunks;
   });
 }
 
