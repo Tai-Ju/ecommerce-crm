@@ -137,6 +137,12 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 const fmt = (d) => { try { return new Date(d + "T00:00:00").toLocaleDateString("zh-TW", { month: "short", day: "numeric" }); } catch { return d; } };
 const fmtFullDate = (d) => { try { return new Date(d + "T00:00:00").toLocaleDateString("zh-TW", { year: "numeric", month: "2-digit", day: "2-digit" }); } catch { return d; } };
 const dk = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+/** YYYY-MM-DD → 顯示用「2026 年 4 月 1 日」 */
+const fmtYmdLabel = (ymd) => {
+  const m = String(ymd || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return ymd || "";
+  return `${m[1]} 年 ${+m[2]} 月 ${+m[3]} 日`;
+};
 const normalizeTime = (t) => {
   const s = String(t || "").trim();
   if (!s) return "00:00:00";
@@ -409,7 +415,9 @@ function playbookMiniRichToHtml(text) {
 }
 
 function removeInteractionsSyncedFromMeeting(interactions, meetingId) {
-  return interactions.filter(i => i.fromMeetingId !== meetingId);
+  if (meetingId == null || String(meetingId).trim() === "") return interactions;
+  const mid = String(meetingId);
+  return interactions.filter(i => String(i.fromMeetingId ?? "") !== mid);
 }
 
 /** 舊資料可能 split 在 partnerPlan / actionItems；編輯時合併為單一欄位顯示 */
@@ -688,6 +696,8 @@ const css = `
   .cal-event.type-實體暖身{background:#eef2ff;color:#4338ca}
   .cal-event.type-產品課程{background:#faf5ff;color:#6d28d9}
   .cal-event.type-新人啟動{background:#f0fdfa;color:#0f766e}
+  .cal-more-btn{display:block;width:100%;margin-top:2px;padding:3px 2px;border:none;background:none;font-size:9px;color:var(--text3);cursor:pointer;text-align:center;font-family:'DM Mono',monospace;border-radius:4px;line-height:1.2}
+  .cal-more-btn:hover{background:var(--bg3);color:var(--gold)}
 
   /* ── Partner detail tabs ── */
   .detail-tab{background:none;border:none;cursor:pointer;padding:8px 14px;font-family:'Noto Serif TC',serif;font-size:13px;color:var(--text2);border-bottom:2px solid transparent;transition:all .18s}
@@ -753,10 +763,19 @@ export default function App() {
       const migratedIx = rawIx.map(i => {
         const nextType = i.type === "討論" ? "暖身" : i.type;
         const nextTime = i.time != null && String(i.time).trim() !== "" ? normalizeTime(i.time) : "00:00:00";
-        return (nextType !== i.type || nextTime !== (i.time || "")) ? { ...i, type: nextType, time: nextTime } : i;
+        const fid = i.fromMeetingId != null && String(i.fromMeetingId).trim() !== "" ? String(i.fromMeetingId) : undefined;
+        const out = { ...i, type: nextType, time: nextTime };
+        if (fid !== undefined) out.fromMeetingId = fid;
+        else delete out.fromMeetingId;
+        return out;
       });
       setInteractions(migratedIx);
-      if (rawIx.some(i => i.type === "討論" || !(i.time != null && String(i.time).trim() !== ""))) save(KEYS.interactions, migratedIx);
+      const ixNeedsPersistMigrate = (i) =>
+        i.type === "討論" ||
+        !(i.time != null && String(i.time).trim() !== "") ||
+        i.fromMeetingId === "" ||
+        (i.fromMeetingId != null && String(i.fromMeetingId).trim() !== "" && typeof i.fromMeetingId !== "string");
+      if (rawIx.some(ixNeedsPersistMigrate)) save(KEYS.interactions, migratedIx);
       setTodos((await load(KEYS.todos)) || SEED_TODOS);
       setQuotes((await load(KEYS.quotes)) || SEED_QUOTES);
       setGoals((await load(KEYS.goals)) || SEED_GOALS);
@@ -768,7 +787,18 @@ export default function App() {
     })();
   }, []);
 
-  const persist = useCallback((key, val, setter) => { setter(val); save(key, val); }, []);
+  const persist = useCallback((key, val, setter) => {
+    if (typeof val === "function") {
+      setter((prev) => {
+        const next = val(prev);
+        save(key, next);
+        return next;
+      });
+      return;
+    }
+    setter(val);
+    save(key, val);
+  }, []);
 
   if (!loaded) return <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100vh", color:var_gold, fontFamily:"'Playfair Display',serif", fontSize:20 }}><style>{css}</style>載入中…</div>;
 
@@ -861,7 +891,7 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
   const pendingInteractions = interactions
     .filter(i=>i.status==="待執行")
     .sort((a,b)=>toMsDT(a.date,a.time) - toMsDT(b.date,b.time));
-  const toggleInteraction = (id) => setInteractions(interactions.map(i=>i.id===id?{...i,status:"已完成"}:i));
+  const toggleInteraction = (id) => setInteractions((prev) => prev.map(i=>i.id===id?{...i,status:"已完成"}:i));
 
   const openIncomeNew = () => {
     setEditingIncomeId("");
@@ -1360,12 +1390,9 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
   const partnerInteractions = selected
     ? interactions
         .filter(i => {
-          if (i.partnerId === selected.id) return true;
-          if (i.type === "上線會議" && !i.partnerId) {
-            const plan = mergeMeetingPlanFields(i.partnerPlan, i.actionItems);
-            return selected.name && plan.includes(selected.name);
-          }
-          return false;
+          // 夥伴頁只顯示掛在本人名下的互動（含會議拆筆）；不顯示無夥伴綁定的上線會議主紀錄，以免與拆筆重複
+          if (i.type === "上線會議" && !i.partnerId) return false;
+          return i.partnerId === selected.id;
         })
         .sort((a, b) => {
           const todayMs = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00").getTime();
@@ -1415,15 +1442,17 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
 
   const deleteInteraction = (id) => {
     if (!selected) return;
-    const target = interactions.find(i=>i.id===id);
-    let next = interactions.filter(i=>i.id!==id);
-    // 若刪除上線會議，連帶刪除它自動產生的 規劃 行動項目（避免殘留）
-    if (target?.type === "上線會議") {
-      next = removeInteractionsSyncedFromMeeting(next, id);
-      const prefix = `來自上線會議「${target.title}」的行動項目`;
-      next = next.filter(i => !(i.type === "規劃" && i.content === prefix && (i.fromMeetingId === id || (!i.fromMeetingId && i.partnerId === selected.id))));
-    }
-    setInteractions(next);
+    setInteractions((prev) => {
+      const target = prev.find((i) => i.id === id);
+      let next = prev.filter((i) => i.id !== id);
+      if (target?.type === "上線會議") {
+        next = removeInteractionsSyncedFromMeeting(next, id);
+        const prefix = `來自上線會議「${target.title}」的行動項目`;
+        const idStr = String(id);
+        next = next.filter(i => !(i.type === "規劃" && i.content === prefix && (String(i.fromMeetingId ?? "") === idStr || (!i.fromMeetingId && i.partnerId === selected.id))));
+      }
+      return next;
+    });
     setShowInteractionForm(false);
   };
 
@@ -1440,16 +1469,16 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       }
     }
 
-    // 新增/編輯互動主紀錄
-    const hasId = interactions.some(i=>i.id===entry.id);
-    let next = hasId ? interactions.map(i=>i.id===entry.id?entry:i) : [...interactions, entry];
-
-    if (entry.type === "上線會議") {
-      next = removeInteractionsSyncedFromMeeting(next, entry.id);
-      next = [...next, ...buildMeetingPlanLineEntries(entry, partners)];
-    }
-
-    setInteractions(next);
+    // 新增/編輯互動主紀錄（函式式更新，避免連續儲存時 interations 過期導致子筆未移除）
+    setInteractions((prev) => {
+      const hasId = prev.some((i) => i.id === entry.id);
+      let next = hasId ? prev.map((i) => (i.id === entry.id ? entry : i)) : [...prev, entry];
+      if (entry.type === "上線會議") {
+        next = removeInteractionsSyncedFromMeeting(next, entry.id);
+        next = [...next, ...buildMeetingPlanLineEntries(entry, partners)];
+      }
+      return next;
+    });
     const field = scheduleFieldForType(entry.type);
     if (field && selected?.id) {
       const nextPartners = partners.map(p => (p.id === selected.id ? { ...p, [field]: entry.date } : p));
@@ -1906,6 +1935,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
   const [scheduleDraft, setScheduleDraft] = useState(null); // { partnerId, fromField, type, date }
   const [partnerSearch, setPartnerSearch] = useState("");
   const [calMonth, setCalMonth] = useState(()=>{ const n=new Date(); return {y:n.getFullYear(),m:n.getMonth()}; });
+  const [calDayListModal, setCalDayListModal] = useState(null); // { ymd, items }
 
   const sortByNearToday = (a, b) => {
     const todayMs = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00").getTime();
@@ -2010,29 +2040,35 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
         if (!ok) return;
       }
     }
-    let next = interactions.find(i => i.id === entry.id) ? interactions.map(i => i.id === entry.id ? entry : i) : [...interactions, entry];
-    if (entry.type === "上線會議") {
-      next = removeInteractionsSyncedFromMeeting(next, entry.id);
-      next = [...next, ...buildMeetingPlanLineEntries(entry, partners)];
-    }
+    setInteractions((prev) => {
+      let next = prev.find((i) => i.id === entry.id) ? prev.map((i) => (i.id === entry.id ? entry : i)) : [...prev, entry];
+      if (entry.type === "上線會議") {
+        next = removeInteractionsSyncedFromMeeting(next, entry.id);
+        next = [...next, ...buildMeetingPlanLineEntries(entry, partners)];
+      }
+      return next;
+    });
     const field = scheduleFieldForType(entry.type);
     if (field && entry.partnerId) {
       const nextPartners = partners.map(p => (p.id === entry.partnerId ? { ...p, [field]: entry.date } : p));
       setPartners(nextPartners);
     }
-    setInteractions(next); setShowForm(false);
+    setShowForm(false);
   };
   const del = (id) => {
-    const target = interactions.find(i=>i.id===id);
-    let next = interactions.filter(i=>i.id!==id);
-    if (target?.type === "上線會議") {
-      next = removeInteractionsSyncedFromMeeting(next, id);
-      const prefix = `來自上線會議「${target.title}」的行動項目`;
-      next = next.filter(i => !(i.type === "規劃" && i.content === prefix));
-    }
-    setInteractions(next); setSelected(null);
+    setInteractions((prev) => {
+      const target = prev.find((i) => i.id === id);
+      let next = prev.filter((i) => i.id !== id);
+      if (target?.type === "上線會議") {
+        next = removeInteractionsSyncedFromMeeting(next, id);
+        const prefix = `來自上線會議「${target.title}」的行動項目`;
+        next = next.filter(i => !(i.type === "規劃" && i.content === prefix));
+      }
+      return next;
+    });
+    setSelected(null);
   };
-  const toggle = (id) => setInteractions(interactions.map(i=>i.id===id?{...i,status:i.status==="已完成"?"待執行":"已完成"}:i));
+  const toggle = (id) => setInteractions((prev) => prev.map(i=>i.id===id?{...i,status:i.status==="已完成"?"待執行":"已完成"}:i));
   const openScheduleEdit = (it) => {
     if (!it?.isPartnerSchedule) return;
     setScheduleDraft({ partnerId: it.partnerId, fromField: it.sourceField, type: it.type, date: it.date });
@@ -2138,11 +2174,50 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
                       </div>
                     );
                   })}
-                  {dayItemsSorted.length>3&&<div style={{fontSize:8,color:"var(--text3)"}}>+{dayItemsSorted.length-3}</div>}
+                  {dayItemsSorted.length>3&&(
+                    <button
+                      type="button"
+                      className="cal-more-btn"
+                      title="點開查看當日全部行程"
+                      onClick={(e) => { e.stopPropagation(); setCalDayListModal({ ymd: k, items: dayItemsSorted }); }}
+                    >
+                      +{dayItemsSorted.length-3}
+                    </button>
+                  )}
                 </div>
               );
             })}
           </div>
+          {calDayListModal && (
+            <Modal title={`${fmtYmdLabel(calDayListModal.ymd)} · 共 ${calDayListModal.items.length} 筆`} onClose={() => setCalDayListModal(null)} wide>
+              <div style={{ maxHeight: "min(60vh, 420px)", overflowY: "auto", marginTop: 4 }}>
+                {calDayListModal.items.map((it) => {
+                  const p = getP(it.partnerId);
+                  return (
+                    <div
+                      key={it.id}
+                      className="timeline-item"
+                      style={{ cursor: "pointer", marginBottom: 2 }}
+                      onClick={() => { setCalDayListModal(null); setSelected(it); }}
+                    >
+                      <div className={`tl-dot type-${it.type}`} style={{ marginTop: 6 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="flex items-center gap-6" style={{ flexWrap: "wrap" }}>
+                          <span style={{ fontWeight: 600, fontSize: 13 }}>{it.title}{p ? ` · ${p.name}` : ""}</span>
+                          {!it.isPartnerSchedule && it.status && <span className={`status-badge status-${it.status}`}>{it.status}</span>}
+                          <span className="tag">{it.type}</span>
+                        </div>
+                        <div className="text-xs mono text-muted mt-3">
+                          {it.date} {normalizeTime(it.time)}
+                          {it.isPartnerSchedule && <span className="text-muted"> · 人脈欄位</span>}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Modal>
+          )}
           {/* 本月紀錄：不列出上線會議拆出的子筆規劃，避免與主紀錄重複 */}
           <div className="subheading">本月紀錄</div>
           <div className="card" style={{padding:0}}>
