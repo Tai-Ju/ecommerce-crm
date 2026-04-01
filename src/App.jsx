@@ -686,6 +686,13 @@ const css = `
   /* ── Forms ── */
   .form-group{margin-bottom:13px}
   .form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  /* 上線會議表單：日期／時間／類型／標題單列壓縮，把垂直空間留給規劃待辦 */
+  .form-row-meeting-head{display:grid;grid-template-columns:minmax(112px,0.9fr) minmax(118px,1fr) minmax(86px,0.72fr) minmax(0,2.35fr);gap:5px 8px;align-items:end;margin-bottom:8px}
+  .form-row-meeting-head .form-group{margin-bottom:0}
+  .form-row-meeting-head .label{margin-bottom:2px;font-size:10px;letter-spacing:0.3px}
+  .form-row-meeting-head .input,.form-row-meeting-head select.input{padding-top:5px;padding-bottom:5px;padding-left:8px;padding-right:8px;font-size:12px}
+  .textarea-meeting-plan{min-height:min(52vh,400px);resize:vertical;line-height:1.55}
+  .meeting-record-box{padding:12px 14px 14px}
 
   /* ── Manifest ── */
   .manifest-banner{background:linear-gradient(135deg,var(--gold-light),#fffbeb);border:1.5px solid var(--gold-border);border-radius:var(--radius);padding:20px 22px;margin-bottom:20px;box-shadow:0 2px 8px rgba(184,134,11,.1)}
@@ -1712,27 +1719,43 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
 
       {/* Interaction form (within partner detail -> (4)互動) */}
       {selected && showInteractionForm && interactionDraft && (
-        <Modal title={interactionEditMode==="new"?"新增互動":"編輯互動"} onClose={()=>setShowInteractionForm(false)} wide>
-          <div className="form-row">
-            <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={interactionDraft.date} onChange={e=>setInteractionDraft({...interactionDraft,date:e.target.value})}/></div>
-            <div className="form-group"><label className="label">時間（時:分:秒）</label><input type="time" step="1" className="input" value={normalizeTime(interactionDraft.time)} onChange={e=>setInteractionDraft({...interactionDraft,time:e.target.value})}/></div>
-            <div className="form-group"><label className="label">類型</label>
-              <select className="input" value={interactionDraft.type} onChange={e=>setInteractionDraft({...interactionDraft,type:e.target.value})}>
-                {["暖身","追蹤","規劃","上線會議","談場","團隊活動","實體暖身","產品課程","新人啟動"].map(t=><option key={t}>{t}</option>)}
-              </select>
+        <Modal title={interactionEditMode==="new"?"新增互動":"編輯互動"} onClose={()=>setShowInteractionForm(false)} wide maxWidth={interactionDraft.type==="上線會議"?780:640}>
+          {interactionDraft.type==="上線會議"? (
+            <div className="form-row-meeting-head">
+              <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={interactionDraft.date} onChange={e=>setInteractionDraft({...interactionDraft,date:e.target.value})}/></div>
+              <div className="form-group"><label className="label">時間</label><input type="time" step="1" className="input" value={normalizeTime(interactionDraft.time)} onChange={e=>setInteractionDraft({...interactionDraft,time:e.target.value})}/></div>
+              <div className="form-group"><label className="label">類型</label>
+                <select className="input" value={interactionDraft.type} onChange={e=>setInteractionDraft({...interactionDraft,type:e.target.value})}>
+                  {["暖身","追蹤","規劃","上線會議","談場","團隊活動","實體暖身","產品課程","新人啟動"].map(t=><option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <div className="form-group"><label className="label">標題 *</label><input className="input" value={interactionDraft.title} onChange={e=>setInteractionDraft({...interactionDraft,title:e.target.value})}/></div>
             </div>
-          </div>
-          <div className="form-group"><label className="label">標題 *</label><input className="input" value={interactionDraft.title} onChange={e=>setInteractionDraft({...interactionDraft,title:e.target.value})}/></div>
+          ) : (
+            <>
+              <div className="form-row">
+                <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={interactionDraft.date} onChange={e=>setInteractionDraft({...interactionDraft,date:e.target.value})}/></div>
+                <div className="form-group"><label className="label">時間（時:分:秒）</label><input type="time" step="1" className="input" value={normalizeTime(interactionDraft.time)} onChange={e=>setInteractionDraft({...interactionDraft,time:e.target.value})}/></div>
+                <div className="form-group"><label className="label">類型</label>
+                  <select className="input" value={interactionDraft.type} onChange={e=>setInteractionDraft({...interactionDraft,type:e.target.value})}>
+                    {["暖身","追蹤","規劃","上線會議","談場","團隊活動","實體暖身","產品課程","新人啟動"].map(t=><option key={t}>{t}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="form-group"><label className="label">標題 *</label><input className="input" value={interactionDraft.title} onChange={e=>setInteractionDraft({...interactionDraft,title:e.target.value})}/></div>
+            </>
+          )}
           {interactionDraft.type !== "上線會議" ? (
             <div className="form-group"><label className="label">內容</label><textarea className="input" style={{minHeight:80}} value={interactionDraft.content||""} onChange={e=>setInteractionDraft({...interactionDraft,content:e.target.value})}/></div>
           ) : (
-            <>
-              <div className="form-group"><label className="label">討論主題 / 結論</label><textarea className="input" style={{minHeight:80}} value={interactionDraft.content||""} onChange={e=>setInteractionDraft({...interactionDraft,content:e.target.value})}/></div>
-              <div className="form-group"><label className="label">具體規劃與待辦（一行一項）</label><textarea className="input" style={{minHeight:120,fontFamily:"'DM Mono',monospace",fontSize:12}} value={interactionDraft.partnerPlan||""} onChange={e=>setInteractionDraft({...interactionDraft,partnerPlan:e.target.value})} placeholder={"王思涵：本週約談場\n幫陳威宇整理獎金說明"}/>
-                <div className="text-xs text-muted mt-6" style={{lineHeight:1.6}}>上線會議主紀錄不綁定單一夥伴；每行會成為一筆互動（依內容自動分類）。行內日期可用「4/7」「YYYY-MM-DD」「5月初」等，子筆落在該日並顯示在月曆；未寫日期者仍同步到人脈，但不進月曆（避免開會當日重複一堆拆筆）。含人脈「姓名」者掛該夥伴。</div>
+            <div className="meeting-record-box" style={{background:"#f5f3ff",border:"1.5px solid #c4b5fd",borderRadius:10,marginBottom:10}}>
+              <div className="subheading" style={{color:"var(--purple)",marginBottom:8}}>🟣 上線會議專屬紀錄</div>
+              <div className="form-group" style={{marginBottom:8}}><label className="label">討論主題 / 結論</label><textarea className="input" style={{minHeight:72}} value={interactionDraft.content||""} onChange={e=>setInteractionDraft({...interactionDraft,content:e.target.value})}/></div>
+              <div className="form-group" style={{marginBottom:6}}><label className="label">具體規劃與待辦（一行一項）</label><textarea className="input textarea-meeting-plan" style={{fontFamily:"'DM Mono',monospace",fontSize:12}} value={interactionDraft.partnerPlan||""} onChange={e=>setInteractionDraft({...interactionDraft,partnerPlan:e.target.value})} placeholder={"王思涵：本週約談場\n幫陳威宇整理獎金說明"}/>
+                <div className="text-xs text-muted mt-5" style={{lineHeight:1.55}}>上線會議主紀錄不綁定單一夥伴；每行會成為一筆互動（依內容自動分類）。行內日期可用「4/7」「YYYY-MM-DD」「5月初」等；未寫日期者仍同步到人脈但不進月曆。含人脈「姓名」者掛該夥伴。</div>
               </div>
-              <div className="form-group"><label className="label">上線金句 / 激勵話語</label><input className="input" value={interactionDraft.quote||""} onChange={e=>setInteractionDraft({...interactionDraft,quote:e.target.value})}/></div>
-            </>
+              <div className="form-group" style={{marginBottom:0}}><label className="label">上線金句 / 激勵話語</label><input className="input" value={interactionDraft.quote||""} onChange={e=>setInteractionDraft({...interactionDraft,quote:e.target.value})}/></div>
+            </div>
           )}
           <div className="form-row">
             <div className="form-group"><label className="label">狀態</label>
@@ -2329,33 +2352,63 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
       )}
 
       {showForm&&editData&&(
-        <Modal title={`${interactions.find(i=>i.id===editData.id)?"編輯":"新增"}紀錄`} onClose={()=>setShowForm(false)} wide>
-          <div className="form-row">
-            <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={editData.date} onChange={e=>setEditData({...editData,date:e.target.value})}/></div>
-            <div className="form-group"><label className="label">時間（時:分:秒）</label><input type="time" step="1" className="input" value={normalizeTime(editData.time)} onChange={e=>setEditData({...editData,time:e.target.value})}/></div>
-            <div className="form-group"><label className="label">類型</label>
-              <select
-                className="input"
-                value={editData.type}
-                onChange={e=>setEditData(prev=>{
-                  const nextType = e.target.value;
-                  const isEditing = interactions.some(i => i.id === prev.id);
-                  const currentTitle = String(prev.title || "").trim();
-                  const shouldAutoFillTitle = !isEditing || !currentTitle || currentTitle === prev.type;
-                  return {
-                    ...prev,
-                    type: nextType,
-                    title: shouldAutoFillTitle ? nextType : prev.title,
-                    partnerId: nextType === "上線會議" ? "" : prev.partnerId,
-                  };
-                })}
-              >
-                {["暖身","追蹤","規劃","上線會議","談場","團隊活動","實體暖身","產品課程","新人啟動"].map(t=><option key={t}>{t}</option>)}
-              </select>
+        <Modal title={`${interactions.find(i=>i.id===editData.id)?"編輯":"新增"}紀錄`} onClose={()=>setShowForm(false)} wide maxWidth={editData.type==="上線會議"?780:640}>
+          {editData.type==="上線會議"? (
+            <div className="form-row-meeting-head">
+              <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={editData.date} onChange={e=>setEditData({...editData,date:e.target.value})}/></div>
+              <div className="form-group"><label className="label">時間</label><input type="time" step="1" className="input" value={normalizeTime(editData.time)} onChange={e=>setEditData({...editData,time:e.target.value})}/></div>
+              <div className="form-group"><label className="label">類型</label>
+                <select
+                  className="input"
+                  value={editData.type}
+                  onChange={e=>setEditData(prev=>{
+                    const nextType = e.target.value;
+                    const isEditing = interactions.some(i => i.id === prev.id);
+                    const currentTitle = String(prev.title || "").trim();
+                    const shouldAutoFillTitle = !isEditing || !currentTitle || currentTitle === prev.type;
+                    return {
+                      ...prev,
+                      type: nextType,
+                      title: shouldAutoFillTitle ? nextType : prev.title,
+                      partnerId: nextType === "上線會議" ? "" : prev.partnerId,
+                    };
+                  })}
+                >
+                  {["暖身","追蹤","規劃","上線會議","談場","團隊活動","實體暖身","產品課程","新人啟動"].map(t=><option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <div className="form-group"><label className="label">標題 *</label><input className="input" value={editData.title} onChange={e=>setEditData({...editData,title:e.target.value})} placeholder="例：與團隊討論四月進度"/></div>
             </div>
-          </div>
-          <div className="form-group"><label className="label">標題 *</label><input className="input" value={editData.title} onChange={e=>setEditData({...editData,title:e.target.value})} placeholder={editData.type==="上線會議"?"例：04/05 與林佳蓉討論四月計畫":""}/>
-          </div>
+          ) : (
+            <>
+              <div className="form-row">
+                <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={editData.date} onChange={e=>setEditData({...editData,date:e.target.value})}/></div>
+                <div className="form-group"><label className="label">時間（時:分:秒）</label><input type="time" step="1" className="input" value={normalizeTime(editData.time)} onChange={e=>setEditData({...editData,time:e.target.value})}/></div>
+                <div className="form-group"><label className="label">類型</label>
+                  <select
+                    className="input"
+                    value={editData.type}
+                    onChange={e=>setEditData(prev=>{
+                      const nextType = e.target.value;
+                      const isEditing = interactions.some(i => i.id === prev.id);
+                      const currentTitle = String(prev.title || "").trim();
+                      const shouldAutoFillTitle = !isEditing || !currentTitle || currentTitle === prev.type;
+                      return {
+                        ...prev,
+                        type: nextType,
+                        title: shouldAutoFillTitle ? nextType : prev.title,
+                        partnerId: nextType === "上線會議" ? "" : prev.partnerId,
+                      };
+                    })}
+                  >
+                    {["暖身","追蹤","規劃","上線會議","談場","團隊活動","實體暖身","產品課程","新人啟動"].map(t=><option key={t}>{t}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="form-group"><label className="label">標題 *</label><input className="input" value={editData.title} onChange={e=>setEditData({...editData,title:e.target.value})} placeholder={editData.type==="上線會議"?"例：04/05 與林佳蓉討論四月計畫":""}/>
+              </div>
+            </>
+          )}
 
           {editData.type !== "上線會議" && (
             <div className="form-group">
@@ -2370,13 +2423,13 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
 
           {/* 上線會議專屬欄位 */}
           {editData.type==="上線會議"?(
-            <div style={{background:"#f5f3ff",border:"1.5px solid #c4b5fd",borderRadius:10,padding:"14px 16px",marginBottom:12}}>
-              <div className="subheading" style={{color:"var(--purple)",marginBottom:10}}>🟣 上線會議專屬紀錄</div>
-              <div className="form-group"><label className="label">討論主題 / 結論</label><textarea className="input" style={{minHeight:80}} value={editData.content||""} onChange={e=>setEditData({...editData,content:e.target.value})} placeholder="今天討論了什麼？結論是什麼？"/></div>
-              <div className="form-group"><label className="label">具體規劃與待辦（一行一項）</label><textarea className="input" style={{minHeight:120,fontFamily:"'DM Mono',monospace",fontSize:12}} value={editData.partnerPlan||""} onChange={e=>setEditData({...editData,partnerPlan:e.target.value})} placeholder={"王思涵：本週約談場\n幫陳威宇整理獎金說明"}/>
-                <div className="text-xs text-muted mt-6" style={{lineHeight:1.6}}>上線會議不綁定關聯夥伴；每行會成為一筆互動（依內容自動分類）。行內日期支援「4/7」「YYYY-MM-DD」「5月初」等，有日期者會出現在月曆對應日；未寫日期者仍會同步到人脈但不進月曆，開會當日僅顯示主紀錄。</div>
+            <div className="meeting-record-box" style={{background:"#f5f3ff",border:"1.5px solid #c4b5fd",borderRadius:10,marginBottom:10}}>
+              <div className="subheading" style={{color:"var(--purple)",marginBottom:8}}>🟣 上線會議專屬紀錄</div>
+              <div className="form-group" style={{marginBottom:8}}><label className="label">討論主題 / 結論</label><textarea className="input" style={{minHeight:72}} value={editData.content||""} onChange={e=>setEditData({...editData,content:e.target.value})} placeholder="今天討論了什麼？結論是什麼？"/></div>
+              <div className="form-group" style={{marginBottom:6}}><label className="label">具體規劃與待辦（一行一項）</label><textarea className="input textarea-meeting-plan" style={{fontFamily:"'DM Mono',monospace",fontSize:12}} value={editData.partnerPlan||""} onChange={e=>setEditData({...editData,partnerPlan:e.target.value})} placeholder={"王思涵：本週約談場\n幫陳威宇整理獎金說明"}/>
+                <div className="text-xs text-muted mt-5" style={{lineHeight:1.55}}>上線會議不綁定關聯夥伴；每行會成為一筆互動（依內容自動分類）。行內日期支援「4/7」「YYYY-MM-DD」「5月初」等，有日期者會出現在月曆對應日；未寫日期者仍會同步到人脈但不進月曆，開會當日僅顯示主紀錄。</div>
               </div>
-              <div className="form-group"><label className="label">上線給的金句 / 激勵話語</label><input className="input" value={editData.quote||""} onChange={e=>setEditData({...editData,quote:e.target.value})} placeholder="例：做不到不是能力問題，是還沒找到對的方式"/></div>
+              <div className="form-group" style={{marginBottom:0}}><label className="label">上線給的金句 / 激勵話語</label><input className="input" value={editData.quote||""} onChange={e=>setEditData({...editData,quote:e.target.value})} placeholder="例：做不到不是能力問題，是還沒找到對的方式"/></div>
             </div>
           ):(
             <>
@@ -2806,10 +2859,11 @@ function QuotesTab({ quotes, setQuotes }) {
 }
 
 // ─── Modal ────────────────────────────────────────────────────────
-function Modal({ title, children, onClose, wide }) {
+function Modal({ title, children, onClose, wide, maxWidth }) {
+  const modalMw = maxWidth != null ? maxWidth : (wide ? 640 : 500);
   return (
     <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div className="modal" style={{maxWidth:wide?640:500}}>
+      <div className="modal" style={{ maxWidth: modalMw }}>
         <div className="modal-header">
           <h3 style={{fontFamily:"'Playfair Display',serif",color:var_gold,fontSize:17}}>{title}</h3>
           <button className="close-btn" onClick={onClose}>✕</button>
