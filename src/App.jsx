@@ -691,7 +691,8 @@ const css = `
   .form-row-meeting-head .form-group{margin-bottom:0}
   .form-row-meeting-head .label{margin-bottom:2px;font-size:10px;letter-spacing:0.3px}
   .form-row-meeting-head .input,.form-row-meeting-head select.input{padding-top:5px;padding-bottom:5px;padding-left:8px;padding-right:8px;font-size:12px}
-  .textarea-meeting-plan{min-height:min(52vh,400px);resize:vertical;line-height:1.55}
+  /* 約 20+ 行可見高度（12px ×1.55×20 ≈ 372px + 內距），避免剛打幾行就出現捲軸 */
+  .textarea-meeting-plan{min-height:460px;resize:vertical;line-height:1.55;box-sizing:border-box}
   .meeting-record-box{padding:12px 14px 14px}
 
   /* ── Manifest ── */
@@ -1751,7 +1752,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             <div className="meeting-record-box" style={{background:"#f5f3ff",border:"1.5px solid #c4b5fd",borderRadius:10,marginBottom:10}}>
               <div className="subheading" style={{color:"var(--purple)",marginBottom:8}}>🟣 上線會議專屬紀錄</div>
               <div className="form-group" style={{marginBottom:8}}><label className="label">討論主題 / 結論</label><textarea className="input" style={{minHeight:72}} value={interactionDraft.content||""} onChange={e=>setInteractionDraft({...interactionDraft,content:e.target.value})}/></div>
-              <div className="form-group" style={{marginBottom:6}}><label className="label">具體規劃與待辦（一行一項）</label><textarea className="input textarea-meeting-plan" style={{fontFamily:"'DM Mono',monospace",fontSize:12}} value={interactionDraft.partnerPlan||""} onChange={e=>setInteractionDraft({...interactionDraft,partnerPlan:e.target.value})} placeholder={"王思涵：本週約談場\n幫陳威宇整理獎金說明"}/>
+              <div className="form-group" style={{marginBottom:6}}><label className="label">具體規劃與待辦（一行一項）</label><textarea className="input textarea-meeting-plan" rows={22} style={{fontFamily:"'DM Mono',monospace",fontSize:12}} value={interactionDraft.partnerPlan||""} onChange={e=>setInteractionDraft({...interactionDraft,partnerPlan:e.target.value})} placeholder={"王思涵：本週約談場\n幫陳威宇整理獎金說明"}/>
                 <div className="text-xs text-muted mt-5" style={{lineHeight:1.55}}>上線會議主紀錄不綁定單一夥伴；每行會成為一筆互動（依內容自動分類）。行內日期可用「4/7」「YYYY-MM-DD」「5月初」等；未寫日期者仍同步到人脈但不進月曆。含人脈「姓名」者掛該夥伴。</div>
               </div>
               <div className="form-group" style={{marginBottom:0}}><label className="label">上線金句 / 激勵話語</label><input className="input" value={interactionDraft.quote||""} onChange={e=>setInteractionDraft({...interactionDraft,quote:e.target.value})}/></div>
@@ -2426,7 +2427,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
             <div className="meeting-record-box" style={{background:"#f5f3ff",border:"1.5px solid #c4b5fd",borderRadius:10,marginBottom:10}}>
               <div className="subheading" style={{color:"var(--purple)",marginBottom:8}}>🟣 上線會議專屬紀錄</div>
               <div className="form-group" style={{marginBottom:8}}><label className="label">討論主題 / 結論</label><textarea className="input" style={{minHeight:72}} value={editData.content||""} onChange={e=>setEditData({...editData,content:e.target.value})} placeholder="今天討論了什麼？結論是什麼？"/></div>
-              <div className="form-group" style={{marginBottom:6}}><label className="label">具體規劃與待辦（一行一項）</label><textarea className="input textarea-meeting-plan" style={{fontFamily:"'DM Mono',monospace",fontSize:12}} value={editData.partnerPlan||""} onChange={e=>setEditData({...editData,partnerPlan:e.target.value})} placeholder={"王思涵：本週約談場\n幫陳威宇整理獎金說明"}/>
+              <div className="form-group" style={{marginBottom:6}}><label className="label">具體規劃與待辦（一行一項）</label><textarea className="input textarea-meeting-plan" rows={22} style={{fontFamily:"'DM Mono',monospace",fontSize:12}} value={editData.partnerPlan||""} onChange={e=>setEditData({...editData,partnerPlan:e.target.value})} placeholder={"王思涵：本週約談場\n幫陳威宇整理獎金說明"}/>
                 <div className="text-xs text-muted mt-5" style={{lineHeight:1.55}}>上線會議不綁定關聯夥伴；每行會成為一筆互動（依內容自動分類）。行內日期支援「4/7」「YYYY-MM-DD」「5月初」等，有日期者會出現在月曆對應日；未寫日期者仍會同步到人脈但不進月曆，開會當日僅顯示主紀錄。</div>
               </div>
               <div className="form-group" style={{marginBottom:0}}><label className="label">上線給的金句 / 激勵話語</label><input className="input" value={editData.quote||""} onChange={e=>setEditData({...editData,quote:e.target.value})} placeholder="例：做不到不是能力問題，是還沒找到對的方式"/></div>
