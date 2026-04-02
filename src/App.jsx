@@ -828,6 +828,22 @@ const css = `
   .cal-event.type-新人啟動{background:#f0fdfa;color:#0f766e}
   .cal-more-btn{display:block;width:100%;margin-top:2px;padding:3px 2px;border:none;background:none;font-size:9px;color:var(--text3);cursor:pointer;text-align:center;font-family:'DM Mono',monospace;border-radius:4px;line-height:1.2}
   .cal-more-btn:hover{background:var(--bg3);color:var(--gold)}
+  /* 月曆分類篩選：與 .cal-event.type-* 同色區分 */
+  .cal-filter-pill{font-size:12px;padding:4px 10px;border-radius:7px;border:1.5px solid transparent;cursor:pointer;font-family:'Noto Serif TC',serif;font-weight:500;transition:box-shadow .15s,border-color .15s,filter .12s}
+  .cal-filter-pill:hover{filter:brightness(0.97)}
+  .cal-filter-pill.is-on{box-shadow:0 0 0 2px var(--gold);font-weight:700}
+  .cal-filter-pill--all{background:#fff;border-color:var(--border2);color:var(--text2)}
+  .cal-filter-pill--all.is-on{background:var(--gold);border-color:var(--gold);color:#fff;box-shadow:none}
+  .cal-filter-pill--pending{background:var(--gold-light);border-color:var(--gold-border);color:var(--gold)}
+  .cal-filter-pill--meet{background:#f5f3ff;border-color:#c4b5fd;color:var(--purple)}
+  .cal-filter-pill--warm{background:#eff6ff;border-color:#bfdbfe;color:var(--blue)}
+  .cal-filter-pill--follow{background:var(--gold-light);border-color:var(--gold-border);color:var(--gold)}
+  .cal-filter-pill--plan{background:#f0fdf4;border-color:#86efac;color:var(--green)}
+  .cal-filter-pill--talk{background:#fff7ed;border-color:#fdba74;color:#c2410c}
+  .cal-filter-pill--team{background:#ecfdf5;border-color:#6ee7b7;color:#047857}
+  .cal-filter-pill--phy{background:#eef2ff;border-color:#a5b4fc;color:#4338ca}
+  .cal-filter-pill--course{background:#faf5ff;border-color:#d8b4fe;color:#6d28d9}
+  .cal-filter-pill--newbie{background:#f0fdfa;border-color:#5eead4;color:#0f766e}
 
   /* ── Partner detail tabs ── */
   .detail-tab{background:none;border:none;cursor:pointer;padding:8px 14px;font-family:'Noto Serif TC',serif;font-size:13px;color:var(--text2);border-bottom:2px solid transparent;transition:all .18s}
@@ -2072,6 +2088,21 @@ function CostSection({ partner, onUpdate }) {
   );
 }
 
+/** 月曆分類篩選 → CSS 後綴（色系與 .cal-event.type-* 對齊） */
+const CAL_FILTER_SLUG = {
+  全部: "all",
+  待執行: "pending",
+  上線會議: "meet",
+  暖身: "warm",
+  追蹤: "follow",
+  規劃: "plan",
+  談場: "talk",
+  團隊活動: "team",
+  實體暖身: "phy",
+  產品課程: "course",
+  新人啟動: "newbie",
+};
+
 // ─── Timeline ─────────────────────────────────────────────────────
 function Timeline({ interactions, setInteractions, partners, setPartners }) {
   const [filter, setFilter] = useState("全部");
@@ -2290,7 +2321,16 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
       {/* 月曆（唯一檢視）：分類篩選 + 格線 + 本月紀錄 */}
       <div>
           <div className="flex gap-8 mb-14" style={{flexWrap:"wrap"}}>
-            {["全部","待執行","上線會議","暖身","追蹤","規劃","談場","團隊活動","實體暖身","產品課程","新人啟動"].map(f=><button key={f} className={`btn btn-sm ${filter===f?"btn-gold":"btn-ghost"}`} style={f==="上線會議"&&filter!==f?{borderColor:"#c4b5fd",color:"var(--purple)"}:{}} onClick={()=>setFilter(f)}>{f}</button>)}
+            {Object.keys(CAL_FILTER_SLUG).map((f) => (
+              <button
+                key={f}
+                type="button"
+                className={`cal-filter-pill cal-filter-pill--${CAL_FILTER_SLUG[f]}${filter === f ? " is-on" : ""}`}
+                onClick={() => setFilter(f)}
+              >
+                {f}
+              </button>
+            ))}
           </div>
           <div className="flex items-center justify-between mb-12">
             <button className="btn btn-ghost btn-sm" onClick={()=>setCalMonth(p=>{const d=new Date(p.y,p.m-1);return{y:d.getFullYear(),m:d.getMonth()};})}>‹ 上月</button>
