@@ -159,6 +159,34 @@ const SCHEDULE_TYPES = ["談場", "談場未到", "團隊活動", "實體暖身"
 const scheduleFieldForType = (t) =>
   ({ 談場: "dateTalkVenue", 談場未到: "dateTalkVenueNoShow", 團隊活動: "dateTeamActivity", 實體暖身: "dateWarmupPhysical", 產品課程: "dateProductCourse" }[t] || "");
 
+/** 互動紀錄若為行程類型，將日期併入夥伴對應欄位（多日期） */
+function syncPartnerFieldFromInteraction(entry, setPartners) {
+  const field = scheduleFieldForType(entry.type);
+  if (!field || !entry.partnerId || !entry.date) return;
+  setPartners((prev) =>
+    prev.map((p) => {
+      if (p.id !== entry.partnerId) return p;
+      const cur = parseMultiYmdList(p[field]);
+      if (!cur.includes(entry.date)) cur.push(entry.date);
+      cur.sort();
+      return { ...p, [field]: cur.join("、") };
+    })
+  );
+}
+
+/** 新增互動草稿：有實質內容才寫入列表，避免空白幽靈筆 */
+function interactionDraftIsPersistable(raw, interactions) {
+  if (!raw?.id) return false;
+  const isNew = !interactions.some((i) => i.id === raw.id);
+  if (!isNew) return true;
+  const t = String(raw.title || "").trim();
+  const c = String(raw.content || "").trim();
+  const pp = String(raw.partnerPlan || "").trim();
+  const q = String(raw.quote || "").trim();
+  if (raw.type === "上線會議") return !!(c || pp || q || t);
+  return !!(t || c);
+}
+
 /** 人脈 CSV：第一列標題對應（Excel 另存 UTF-8 CSV，逗號或 TAB 皆可） */
 const PARTNER_CSV_COLUMNS_DOC = [
   "姓名",
@@ -1075,6 +1103,14 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
   const saveIncomes = (next) => {
     persistIncomes(next);
   };
+  const incomesRefDash = useRef(incomes);
+  incomesRefDash.current = incomes;
+  const incomeAutosaveTimer = useRef(null);
+  const newIncomeTempId = useRef("");
+  const costsRefDash = useRef(selfCosts);
+  costsRefDash.current = selfCosts;
+  const costAutosaveTimer = useRef(null);
+  const newCostTempId = useRef("");
 
   const recruitStats = ["邀約拒絕","談後拒絕","未加入","暖身中","確定談場","談場延期","跟進中","已付訂金","已加入"].map(r=>({ role:r, count:partners.filter(p=>p.role===r).length }));
   const rcol = { 未加入:"#aaa", 暖身中:"#2563eb", 確定談場:"#b8860b", 談場延期:"#e67e22", 跟進中:"#7c3aed", 已付訂金:"#f59e0b", 邀約拒絕:"#c0392b", 談後拒絕:"#e74c3c", 已加入:"#27ae60" };
@@ -1115,6 +1151,7 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
   const toggleInteraction = (id) => setInteractions((prev) => prev.map(i=>i.id===id?{...i,status:"已完成"}:i));
 
   const openIncomeNew = () => {
+    newIncomeTempId.current = "";
     setEditingIncomeId("");
     setIncomeDraft({ date: new Date().toISOString().slice(0,10), amount: "", note: "" });
     setShowIncomeForm(true);
@@ -1137,6 +1174,7 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
   const allCosts = [...selfCosts].sort((a,b)=>b.date.localeCompare(a.date));
 
   const openCostNew = () => {
+    newCostTempId.current = "";
     setEditingCostId("");
     setCostDraft({
       date: new Date().toISOString().slice(0,10),
@@ -1167,6 +1205,49 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
   const deleteCost = (cost) => {
     persistSelfCosts(selfCosts.filter(c=>c.id!==cost.id));
   };
+
+  const persistIncomesRef = useRef(persistIncomes);
+  persistIncomesRef.current = persistIncomes;
+  const persistSelfCostsRef = useRef(persistSelfCosts);
+  persistSelfCostsRef.current = persistSelfCosts;
+
+  useEffect(() => {
+    if (!showIncomeForm) return;
+    if (incomeAutosaveTimer.current) clearTimeout(incomeAutosaveTimer.current);
+    incomeAutosaveTimer.current = setTimeout(() => {
+      const amt = incomeDraft.amount === "" ? 0 : +incomeDraft.amount;
+      const noteT = String(incomeDraft.note || "").trim();
+      if (!editingIncomeId && !amt && !noteT) return;
+      const id = editingIncomeId || newIncomeTempId.current || (newIncomeTempId.current = uid());
+      const payload = { id, date: incomeDraft.date, amount: amt, note: incomeDraft.note || "" };
+      const list = incomesRefDash.current;
+      const next = editingIncomeId ? list.map((i) => (i.id === editingIncomeId ? payload : i)) : [...list.filter((i) => i.id !== id), payload];
+      persistIncomesRef.current(next);
+      if (!editingIncomeId) setEditingIncomeId(id);
+    }, 300);
+    return () => {
+      if (incomeAutosaveTimer.current) clearTimeout(incomeAutosaveTimer.current);
+    };
+  }, [showIncomeForm, incomeDraft, editingIncomeId]);
+
+  useEffect(() => {
+    if (!showCostForm) return;
+    if (costAutosaveTimer.current) clearTimeout(costAutosaveTimer.current);
+    costAutosaveTimer.current = setTimeout(() => {
+      const amt = costDraft.amount === "" ? 0 : +costDraft.amount;
+      const noteT = String(costDraft.note || "").trim();
+      if (!editingCostId && !amt && !noteT) return;
+      const id = editingCostId || newCostTempId.current || (newCostTempId.current = uid());
+      const payload = { id, date: costDraft.date, type: costDraft.type, amount: amt, note: costDraft.note || "" };
+      const list = costsRefDash.current;
+      const next = editingCostId ? list.map((c) => (c.id === editingCostId ? payload : c)) : [...list.filter((c) => c.id !== id), payload];
+      persistSelfCostsRef.current(next);
+      if (!editingCostId) setEditingCostId(id);
+    }, 300);
+    return () => {
+      if (costAutosaveTimer.current) clearTimeout(costAutosaveTimer.current);
+    };
+  }, [showCostForm, costDraft, editingCostId]);
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:18}}>
@@ -1345,49 +1426,51 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
 
       {/* Modals */}
       {editGoals&&(
-        <Modal title="設定目標" onClose={()=>setEditGoals(false)}>
+        <Modal title="設定目標" onClose={()=>setEditGoals(false)} closeOnOverlayClick={false}>
           {[["monthlyIncome","月收入目標 (NT$)"],["monthlyPartners","夥伴人數目標"]].map(([k,l])=>(
-            <div className="form-group" key={k}><label className="label">{l}</label><input type="number" className="input" value={gd[k]||""} onChange={e=>setGd({...gd,[k]:+e.target.value})}/></div>
+            <div className="form-group" key={k}><label className="label">{l}</label><input type="number" className="input" value={gd[k]||""} onChange={e=>{ const n={...gd,[k]:+e.target.value}; setGd(n); setGoals(n); }}/></div>
           ))}
-          <div className="flex gap-8 mt-12"><button className="btn btn-gold" onClick={()=>{setGoals(gd);setEditGoals(false);}}>儲存</button><button className="btn btn-ghost" onClick={()=>setEditGoals(false)}>取消</button></div>
+          <div className="flex gap-8 mt-12"><button type="button" className="btn btn-gold" onClick={()=>setEditGoals(false)}>完成</button></div>
         </Modal>
       )}
       {editManifest&&(
-        <Modal title="目標宣言 & 顯化條件" onClose={()=>setEditManifest(false)}>
-          <div className="form-group"><label className="label">目標宣言（一句話）</label><textarea className="input" style={{minHeight:72}} value={md.declaration} onChange={e=>setMd({...md,declaration:e.target.value})}/></div>
+        <Modal title="目標宣言 & 顯化條件" onClose={()=>setEditManifest(false)} closeOnOverlayClick={false}>
+          <div className="form-group"><label className="label">目標宣言（一句話）</label><textarea className="input" style={{minHeight:72}} value={md.declaration} onChange={e=>{ const n={...md,declaration:e.target.value}; setMd(n); setManifest(n); }}/></div>
           <div className="subheading mt-12">顯化條件</div>
           {md.conditions.map((c,i)=>(
             <div key={i} className="flex items-center gap-8 mt-6">
-              <input className="input" style={{flex:1}} value={c} onChange={e=>setMd({...md,conditions:md.conditions.map((x,j)=>j===i?e.target.value:x)})}/>
-              <button className="btn btn-danger btn-sm" onClick={()=>setMd({...md,conditions:md.conditions.filter((_,j)=>j!==i)})}>✕</button>
+              <input className="input" style={{flex:1}} value={c} onChange={e=>{ const n={...md,conditions:md.conditions.map((x,j)=>j===i?e.target.value:x)}; setMd(n); setManifest(n); }}/>
+              <button type="button" className="btn btn-danger btn-sm" onClick={()=>{ const n={...md,conditions:md.conditions.filter((_,j)=>j!==i)}; setMd(n); setManifest(n); }}>✕</button>
             </div>
           ))}
           <div className="flex gap-8 mt-8">
-            <input className="input" style={{flex:1}} placeholder="新增條件…" value={newCond} onChange={e=>setNewCond(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&newCond.trim()){setMd({...md,conditions:[...md.conditions,newCond.trim()]});setNewCond("");}}}/>
-            <button className="btn btn-ghost btn-sm" onClick={()=>{if(newCond.trim()){setMd({...md,conditions:[...md.conditions,newCond.trim()]});setNewCond("");}}}>＋</button>
+            <input className="input" style={{flex:1}} placeholder="新增條件…" value={newCond} onChange={e=>setNewCond(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&newCond.trim()){ const n={...md,conditions:[...md.conditions,newCond.trim()]}; setMd(n); setManifest(n); setNewCond(""); }}}/>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={()=>{if(newCond.trim()){ const n={...md,conditions:[...md.conditions,newCond.trim()]}; setMd(n); setManifest(n); setNewCond(""); }}}>＋</button>
           </div>
-          <div className="flex gap-8 mt-14"><button className="btn btn-gold" onClick={()=>{setManifest(md);setEditManifest(false);}}>儲存</button><button className="btn btn-ghost" onClick={()=>setEditManifest(false)}>取消</button></div>
+          <div className="flex gap-8 mt-14"><button type="button" className="btn btn-gold" onClick={()=>setEditManifest(false)}>完成</button></div>
         </Modal>
       )}
       {showIncomeForm&&(
-        <Modal title={editingIncomeId?"編輯收入紀錄":"新增收入紀錄"} onClose={()=>setShowIncomeForm(false)}>
+        <Modal title={editingIncomeId?"編輯收入紀錄":"新增收入紀錄"} onClose={()=>setShowIncomeForm(false)} closeOnOverlayClick={false}>
+          <div className="text-xs text-muted mb-10" style={{lineHeight:1.6}}>約 0.3 秒後自動寫入。</div>
           <div className="form-row">
             <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={incomeDraft.date} onChange={e=>setIncomeDraft({...incomeDraft,date:e.target.value})}/></div>
             <div className="form-group"><label className="label">金額 (NT$)</label><input type="number" className="input" value={incomeDraft.amount} onChange={e=>setIncomeDraft({...incomeDraft,amount:e.target.value})}/></div>
           </div>
           <div className="form-group"><label className="label">備注</label><input className="input" value={incomeDraft.note} onChange={e=>setIncomeDraft({...incomeDraft,note:e.target.value})} placeholder="三月獎金、業績分潤…"/></div>
-          <div className="flex gap-8 mt-12"><button className="btn btn-gold" onClick={saveIncome}>{editingIncomeId?"儲存":"新增"}</button><button className="btn btn-ghost" onClick={()=>setShowIncomeForm(false)}>取消</button></div>
+          <div className="flex gap-8 mt-12"><button type="button" className="btn btn-gold" onClick={()=>setShowIncomeForm(false)}>完成</button></div>
         </Modal>
       )}
       {showCostForm&&(
-        <Modal title={editingCostId?"編輯支出紀錄":"新增支出紀錄"} onClose={()=>setShowCostForm(false)}>
+        <Modal title={editingCostId?"編輯支出紀錄":"新增支出紀錄"} onClose={()=>setShowCostForm(false)} closeOnOverlayClick={false}>
+          <div className="text-xs text-muted mb-10" style={{lineHeight:1.6}}>約 0.3 秒後自動寫入。</div>
           <div className="form-group"><label className="label">種類</label><select className="input" value={costDraft.type} onChange={e=>setCostDraft({...costDraft,type:e.target.value})}>{COST_TYPES.map(t=><option key={t}>{t}</option>)}</select></div>
           <div className="form-row">
             <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={costDraft.date} onChange={e=>setCostDraft({...costDraft,date:e.target.value})}/></div>
             <div className="form-group"><label className="label">金額 (NT$)</label><input type="number" className="input" value={costDraft.amount} onChange={e=>setCostDraft({...costDraft,amount:e.target.value})}/></div>
           </div>
           <div className="form-group"><label className="label">備注</label><input className="input" value={costDraft.note} onChange={e=>setCostDraft({...costDraft,note:e.target.value})} placeholder="訂金、買貨、加盟…"/></div>
-          <div className="flex gap-8 mt-12"><button className="btn btn-gold" onClick={saveCost}>{editingCostId?"儲存":"新增"}</button><button className="btn btn-ghost" onClick={()=>setShowCostForm(false)}>取消</button></div>
+          <div className="flex gap-8 mt-12"><button type="button" className="btn btn-gold" onClick={()=>setShowCostForm(false)}>完成</button></div>
         </Modal>
       )}
     </div>
@@ -1400,6 +1483,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
   const [detailTab, setDetailTab] = useState("info");
   const [showForm, setShowForm] = useState(false);
   const [editData, setEditData] = useState(null);
+  const [partnerFormIsNew, setPartnerFormIsNew] = useState(false);
   const [filter, setFilter] = useState("全部");
   const [sortBy, setSortBy] = useState("default");
   const [nameQuery, setNameQuery] = useState("");
@@ -1519,7 +1603,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     setPhotoBusy(true);
     try {
       const dataUrl = await resizeImageToAvatarDataUrl(file);
-      setEditData((prev) => (prev ? { ...prev, photo: dataUrl } : prev));
+      patchPartnerForm({ photo: dataUrl });
     } catch {
       setPhotoError("照片處理失敗，請再試一次。");
     } finally {
@@ -1527,8 +1611,52 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     }
   };
 
-  const openNew = () => { setEditData({id:uid(),name:"",role:"暖身中",avatar:"",photo:"",attribute:"",painPoint:"",region:"",vacation:"",memo:"",gender:"",relation:"",age:"",occupation:"",salary:"",dateTalkVenue:"",dateTalkVenueNoShow:"",dateTeamActivity:"",dateWarmupPhysical:"",dateProductCourse:"",warmupStalled:false,costs:[],abcNote:ABC_TEMPLATE,joined:new Date().toISOString().slice(0,10)}); setShowForm(true); };
+  const normalizePartnerFromDraft = (d) => ({
+    ...d,
+    avatar: d.avatar || d.name?.[0] || "?",
+    photo: d.photo || "",
+    age: d.age === "" ? "" : +d.age,
+    salary: String(d.salary ?? "").trim(),
+    dateTalkVenue: normalizePartnerScheduleFieldInput(d.dateTalkVenue),
+    dateTalkVenueNoShow: normalizePartnerScheduleFieldInput(d.dateTalkVenueNoShow),
+    dateTeamActivity: normalizePartnerScheduleFieldInput(d.dateTeamActivity),
+    dateWarmupPhysical: normalizePartnerScheduleFieldInput(d.dateWarmupPhysical),
+    dateProductCourse: normalizePartnerScheduleFieldInput(d.dateProductCourse),
+    warmupStalled: Boolean(d.warmupStalled),
+  });
+
+  const patchPartnerForm = (partial) => {
+    setEditData((prev) => {
+      if (!prev) return prev;
+      const merged = { ...prev, ...partial };
+      const entry = normalizePartnerFromDraft(merged);
+      setPartners((p) => {
+        const ix = p.findIndex((x) => x.id === entry.id);
+        if (ix < 0) return [...p, entry];
+        return p.map((x) => (x.id === entry.id ? { ...x, ...entry } : x));
+      });
+      setSelected((s) => (s && s.id === entry.id ? { ...s, ...entry } : s));
+      return merged;
+    });
+  };
+
+  const closePartnerForm = () => {
+    if (partnerFormIsNew && editData && !String(editData.name || "").trim()) {
+      setPartners((p) => p.filter((x) => x.id !== editData.id));
+    }
+    setPartnerFormIsNew(false);
+    setShowForm(false);
+  };
+
+  const openNew = () => {
+    const blank = { id: uid(), name: "", role: "暖身中", avatar: "", photo: "", attribute: "", painPoint: "", region: "", vacation: "", memo: "", gender: "", relation: "", age: "", occupation: "", salary: "", dateTalkVenue: "", dateTalkVenueNoShow: "", dateTeamActivity: "", dateWarmupPhysical: "", dateProductCourse: "", warmupStalled: false, costs: [], abcNote: ABC_TEMPLATE, joined: new Date().toISOString().slice(0, 10) };
+    setPartners((p) => [...p, blank]);
+    setEditData(blank);
+    setPartnerFormIsNew(true);
+    setShowForm(true);
+  };
   const openEdit = (p) => {
+    setPartnerFormIsNew(false);
     const nextRole = p.role === "夥伴" ? "已加入" : p.role;
     setEditData({
       ...p,
@@ -1552,23 +1680,6 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       abcNote: p.abcNote || "",
     });
     setShowForm(true);
-  };
-  const saveP = () => {
-    const entry={
-      ...editData,
-      avatar:editData.avatar||editData.name[0]||"?",
-      photo:editData.photo||"",
-      age: editData.age === "" ? "" : +editData.age,
-      salary: String(editData.salary ?? "").trim(),
-      dateTalkVenue: normalizePartnerScheduleFieldInput(editData.dateTalkVenue),
-      dateTalkVenueNoShow: normalizePartnerScheduleFieldInput(editData.dateTalkVenueNoShow),
-      dateTeamActivity: normalizePartnerScheduleFieldInput(editData.dateTeamActivity),
-      dateWarmupPhysical: normalizePartnerScheduleFieldInput(editData.dateWarmupPhysical),
-      dateProductCourse: normalizePartnerScheduleFieldInput(editData.dateProductCourse),
-      warmupStalled: Boolean(editData.warmupStalled),
-    };
-    const next=partners.find(p=>p.id===entry.id)?partners.map(p=>p.id===entry.id?entry:p):[...partners,entry];
-    setPartners(next); setShowForm(false);
   };
   const del = (id) => {
     const target = partners.find(p => p.id === id);
@@ -1679,36 +1790,54 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     setShowInteractionForm(false);
   };
 
-  const saveInteraction = () => {
-    if (!selected || !interactionDraft) return;
-    const tagsArr = normalizeTags(interactionDraft.tags);
-    const entry = { ...interactionDraft, time: normalizeTime(interactionDraft.time), tags: tagsArr, partnerId: interactionDraft.type === "上線會議" ? "" : selected.id };
-    if (entry.type === "上線會議") entry.actionItems = "";
-    if (entry.type === "上線會議") {
-      const unmatched = getUnmatchedMeetingPlanLines(entry.partnerPlan, partners);
-      if (unmatched.length > 0) {
-        const ok = window.confirm(`以下 ${unmatched.length} 行未匹配到夥伴姓名，將不會同步到特定夥伴，但仍會保留在行程紀錄：\n\n- ${unmatched.join("\n- ")}\n\n是否仍要儲存？`);
-        if (!ok) return;
-      }
-    }
+  const partnersIxRef = useRef(partners);
+  partnersIxRef.current = partners;
+  const interactionsIxRef = useRef(interactions);
+  interactionsIxRef.current = interactions;
+  const interactionSaveTimer = useRef(null);
 
-    // 新增/編輯互動主紀錄（函式式更新，避免連續儲存時 interations 過期導致子筆未移除）
-    setInteractions((prev) => {
-      const hasId = prev.some((i) => i.id === entry.id);
-      let next = hasId ? prev.map((i) => (i.id === entry.id ? entry : i)) : [...prev, entry];
-      if (entry.type === "上線會議") {
-        next = removeInteractionsSyncedFromMeeting(next, entry.id);
-        next = [...next, ...buildMeetingPlanLineEntries(entry, partners)];
-      }
-      return next;
-    });
-    const field = scheduleFieldForType(entry.type);
-    if (field && selected?.id) {
-      const nextPartners = partners.map(p => (p.id === selected.id ? { ...p, [field]: entry.date } : p));
-      setPartners(nextPartners);
-      rawSave(nextPartners);
-    }
+  const flushPartnersInteractionNow = useCallback(
+    (raw) => {
+      if (!selected || !raw) return;
+      if (!interactionDraftIsPersistable(raw, interactionsIxRef.current)) return;
+      const tagsArr = normalizeTags(raw.tags);
+      const entry = { ...raw, time: normalizeTime(raw.time), tags: tagsArr, partnerId: raw.type === "上線會議" ? "" : selected.id };
+      if (entry.type === "上線會議") entry.actionItems = "";
+      setInteractions((prev) => {
+        const pool = partnersIxRef.current;
+        const hasId = prev.some((i) => i.id === entry.id);
+        let next = hasId ? prev.map((i) => (i.id === entry.id ? entry : i)) : [...prev, entry];
+        if (entry.type === "上線會議") {
+          next = removeInteractionsSyncedFromMeeting(next, entry.id);
+          next = [...next, ...buildMeetingPlanLineEntries(entry, pool)];
+        }
+        interactionsIxRef.current = next;
+        return next;
+      });
+      syncPartnerFieldFromInteraction(entry, setPartners);
+    },
+    [selected, setInteractions, setPartners]
+  );
+
+  useEffect(() => {
+    if (!showInteractionForm || !interactionDraft || !selected) return;
+    if (!interactionDraftIsPersistable(interactionDraft, interactions)) return;
+    if (interactionSaveTimer.current) clearTimeout(interactionSaveTimer.current);
+    interactionSaveTimer.current = setTimeout(() => {
+      flushPartnersInteractionNow(interactionDraft);
+    }, 320);
+    return () => {
+      if (interactionSaveTimer.current) clearTimeout(interactionSaveTimer.current);
+    };
+  }, [showInteractionForm, interactionDraft, selected, interactions, flushPartnersInteractionNow]);
+
+  const closeInteractionForm = () => {
+    if (interactionDraft && selected) flushPartnersInteractionNow(interactionDraft);
     setShowInteractionForm(false);
+  };
+
+  const saveInteraction = () => {
+    closeInteractionForm();
   };
 
   const roleBadge = (role) => {
@@ -1927,7 +2056,8 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
 
       {/* Interaction form (within partner detail -> (4)互動) */}
       {selected && showInteractionForm && interactionDraft && (
-        <Modal title={interactionEditMode==="new"?"新增互動":"編輯互動"} onClose={()=>setShowInteractionForm(false)} wide maxWidth={interactionDraft.type==="上線會議"?780:640}>
+        <Modal title={interactionEditMode==="new"?"新增互動":"編輯互動"} onClose={closeInteractionForm} closeOnOverlayClick={false} wide maxWidth={interactionDraft.type==="上線會議"?780:640}>
+          <div className="text-xs text-muted mb-10" style={{lineHeight:1.6}}>內容會延遲約 0.3 秒自動儲存；關閉前會再存一次。</div>
           {interactionDraft.type==="上線會議"? (
             <div className="form-row-meeting-head">
               <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={interactionDraft.date} onChange={e=>setInteractionDraft({...interactionDraft,date:e.target.value})}/></div>
@@ -1973,7 +2103,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             </div>
             <div className="form-group"><label className="label">標籤（逗號/頓號分隔）</label><input className="input" value={interactionDraft.tags} onChange={e=>setInteractionDraft({...interactionDraft,tags:e.target.value})}/></div>
           </div>
-          <div className="flex gap-8 mt-12"><button className="btn btn-gold" onClick={saveInteraction}>儲存</button><button className="btn btn-ghost" onClick={()=>setShowInteractionForm(false)}>取消</button></div>
+          <div className="flex gap-8 mt-12"><button type="button" className="btn btn-gold" onClick={saveInteraction}>完成</button></div>
         </Modal>
       )}
 
@@ -2055,60 +2185,61 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
 
       {/* Edit form */}
       {showForm&&editData&&(
-        <Modal title={partners.find(p=>p.id===editData.id)?"編輯夥伴":"新增夥伴"} onClose={()=>setShowForm(false)}>
+        <Modal title={partnerFormIsNew ? "新增夥伴" : "編輯夥伴"} onClose={closePartnerForm} closeOnOverlayClick={false}>
+          <div className="text-xs text-muted mb-10" style={{lineHeight:1.6}}>變更已自動儲存；點「完成」或 ✕ 關閉視窗。</div>
           <div className="form-row">
-            <div className="form-group"><label className="label">姓名 *</label><input className="input" value={editData.name} onChange={e=>setEditData({...editData,name:e.target.value})}/></div>
+            <div className="form-group"><label className="label">姓名 *</label><input className="input" value={editData.name} onChange={e=>patchPartnerForm({ name: e.target.value })}/></div>
             <div className="form-group"><label className="label">身份/狀態</label>
-              <select className="input" value={editData.role} onChange={e=>setEditData({...editData,role:e.target.value})}>
+              <select className="input" value={editData.role} onChange={e=>patchPartnerForm({ role: e.target.value })}>
                 {NON_UPLINE_ROLES.map(r=><option key={r}>{r}</option>)}
               </select>
             </div>
           </div>
           <div className="form-row">
-            <div className="form-group"><label className="label">屬性</label><input className="input" value={editData.attribute} onChange={e=>setEditData({...editData,attribute:e.target.value})}/></div>
-            <div className="form-group"><label className="label">痛點需求</label><input className="input" value={editData.painPoint} onChange={e=>setEditData({...editData,painPoint:e.target.value})}/></div>
+            <div className="form-group"><label className="label">屬性</label><input className="input" value={editData.attribute} onChange={e=>patchPartnerForm({ attribute: e.target.value })}/></div>
+            <div className="form-group"><label className="label">痛點需求</label><input className="input" value={editData.painPoint} onChange={e=>patchPartnerForm({ painPoint: e.target.value })}/></div>
           </div>
           <div className="form-row">
-            <div className="form-group"><label className="label">地區</label><input className="input" value={editData.region} onChange={e=>setEditData({...editData,region:e.target.value})}/></div>
-            <div className="form-group"><label className="label">休假</label><input className="input" value={editData.vacation} onChange={e=>setEditData({...editData,vacation:e.target.value})}/></div>
+            <div className="form-group"><label className="label">地區</label><input className="input" value={editData.region} onChange={e=>patchPartnerForm({ region: e.target.value })}/></div>
+            <div className="form-group"><label className="label">休假</label><input className="input" value={editData.vacation} onChange={e=>patchPartnerForm({ vacation: e.target.value })}/></div>
           </div>
           <div className="form-group">
             <label className="label">暖身卡關註記（已聊天但尚未約出實體見面）</label>
             <label className="text-sm" style={{display:"flex",alignItems:"center",gap:8}}>
-              <input type="checkbox" checked={Boolean(editData.warmupStalled)} onChange={e=>setEditData({...editData,warmupStalled:e.target.checked})}/>
+              <input type="checkbox" checked={Boolean(editData.warmupStalled)} onChange={e=>patchPartnerForm({ warmupStalled: e.target.checked })}/>
               排序置底
             </label>
           </div>
           <div className="form-row">
-            <div className="form-group"><label className="label">性別</label><input className="input" value={editData.gender} onChange={e=>setEditData({...editData,gender:e.target.value})}/></div>
-            <div className="form-group"><label className="label">關係</label><input className="input" value={editData.relation} onChange={e=>setEditData({...editData,relation:e.target.value})}/></div>
+            <div className="form-group"><label className="label">性別</label><input className="input" value={editData.gender} onChange={e=>patchPartnerForm({ gender: e.target.value })}/></div>
+            <div className="form-group"><label className="label">關係</label><input className="input" value={editData.relation} onChange={e=>patchPartnerForm({ relation: e.target.value })}/></div>
           </div>
           <div className="form-row">
-            <div className="form-group"><label className="label">年齡</label><input type="number" className="input" value={editData.age} onChange={e=>setEditData({...editData,age:e.target.value})}/></div>
-            <div className="form-group"><label className="label">職業</label><input className="input" value={editData.occupation} onChange={e=>setEditData({...editData,occupation:e.target.value})}/></div>
+            <div className="form-group"><label className="label">年齡</label><input type="number" className="input" value={editData.age} onChange={e=>patchPartnerForm({ age: e.target.value })}/></div>
+            <div className="form-group"><label className="label">職業</label><input className="input" value={editData.occupation} onChange={e=>patchPartnerForm({ occupation: e.target.value })}/></div>
           </div>
-          <div className="form-group"><label className="label">薪資</label><input type="text" className="input" value={editData.salary} onChange={e=>setEditData({...editData,salary:e.target.value})} placeholder="例：NT$45,000、5萬/月、面議"/></div>
+          <div className="form-group"><label className="label">薪資</label><input type="text" className="input" value={editData.salary} onChange={e=>patchPartnerForm({ salary: e.target.value })} placeholder="例：NT$45,000、5萬/月、面議"/></div>
           <div className="form-group">
             <label className="label">談場（日期）</label>
-            <textarea className="input" style={{minHeight:64}} value={editData.dateTalkVenue || ""} onChange={e=>setEditData({...editData,dateTalkVenue:e.target.value})} placeholder={"每行一個，或逗號／頓號分隔\n例：2026-04-01、2026-04-15"}/>
+            <textarea className="input" style={{minHeight:64}} value={editData.dateTalkVenue || ""} onChange={e=>patchPartnerForm({ dateTalkVenue: e.target.value })} placeholder={"每行一個，或逗號／頓號分隔\n例：2026-04-01、2026-04-15"}/>
           </div>
           <div className="form-group">
             <label className="label">談場未到（約了沒出現）</label>
-            <textarea className="input" style={{minHeight:64}} value={editData.dateTalkVenueNoShow || ""} onChange={e=>setEditData({...editData,dateTalkVenueNoShow:e.target.value})} placeholder={"記錄應到未到場次\n例：2026-04-02"}/>
+            <textarea className="input" style={{minHeight:64}} value={editData.dateTalkVenueNoShow || ""} onChange={e=>patchPartnerForm({ dateTalkVenueNoShow: e.target.value })} placeholder={"記錄應到未到場次\n例：2026-04-02"}/>
           </div>
           <div className="form-row">
             <div className="form-group">
               <label className="label">團隊活動</label>
-              <textarea className="input" style={{minHeight:64}} value={editData.dateTeamActivity || ""} onChange={e=>setEditData({...editData,dateTeamActivity:e.target.value})} placeholder={"多個日期同上"}/>
+              <textarea className="input" style={{minHeight:64}} value={editData.dateTeamActivity || ""} onChange={e=>patchPartnerForm({ dateTeamActivity: e.target.value })} placeholder={"多個日期同上"}/>
             </div>
             <div className="form-group">
               <label className="label">實體暖身</label>
-              <textarea className="input" style={{minHeight:64}} value={editData.dateWarmupPhysical || ""} onChange={e=>setEditData({...editData,dateWarmupPhysical:e.target.value})} placeholder={"多個日期同上"}/>
+              <textarea className="input" style={{minHeight:64}} value={editData.dateWarmupPhysical || ""} onChange={e=>patchPartnerForm({ dateWarmupPhysical: e.target.value })} placeholder={"多個日期同上"}/>
             </div>
           </div>
           <div className="form-group">
             <label className="label">產品課程</label>
-            <textarea className="input" style={{minHeight:64}} value={editData.dateProductCourse || ""} onChange={e=>setEditData({...editData,dateProductCourse:e.target.value})} placeholder={"多個日期同上"}/>
+            <textarea className="input" style={{minHeight:64}} value={editData.dateProductCourse || ""} onChange={e=>patchPartnerForm({ dateProductCourse: e.target.value })} placeholder={"多個日期同上"}/>
           </div>
           <div className="form-group">
             <label className="label">上傳照片（可選）</label>
@@ -2117,7 +2248,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
                 <div className="avatar" style={{width:54,height:54,overflow:"hidden"}}>
                   <img src={editData.photo} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
                 </div>
-                <button className="btn btn-danger btn-sm" onClick={()=>setEditData({...editData,photo:""})}>移除</button>
+                <button type="button" className="btn btn-danger btn-sm" onClick={()=>patchPartnerForm({ photo: "" })}>移除</button>
               </div>
             )}
             <input
@@ -2130,8 +2261,8 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             {photoError && <div className="text-xs" style={{color:"var(--red)",marginTop:6}}>{photoError}</div>}
             <div className="text-xs text-muted mt-4">照片會存到資料庫；建議選擇小檔並以頭像用途為主。</div>
           </div>
-          <div className="form-group"><label className="label">備註</label><textarea className="input" value={editData.memo} onChange={e=>setEditData({...editData,memo:e.target.value})}/></div>
-          <div className="flex gap-8 mt-8"><button className="btn btn-gold" onClick={saveP}>儲存</button><button className="btn btn-ghost" onClick={()=>setShowForm(false)}>取消</button></div>
+          <div className="form-group"><label className="label">備註</label><textarea className="input" value={editData.memo} onChange={e=>patchPartnerForm({ memo: e.target.value })}/></div>
+          <div className="flex gap-8 mt-8"><button type="button" className="btn btn-gold" onClick={closePartnerForm}>完成</button></div>
         </Modal>
       )}
     </div>
@@ -2185,7 +2316,7 @@ const CAL_FILTER_SLUG = {
   全部: "all",
   待執行: "pending",
   上線會議: "meet",
-  "暖身／實體暖身": "warmphy",
+  實體暖身: "warmphy",
   追蹤: "follow",
   規劃: "plan",
   談場: "talk",
@@ -2302,7 +2433,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
   const matchesCalFilter = (i) => {
     if (filter === "全部") return true;
     if (filter === "待執行") return i.status === "待執行";
-    if (filter === "暖身／實體暖身") return i.type === "暖身" || i.type === "實體暖身";
+    if (filter === "實體暖身") return i.type === "暖身" || i.type === "實體暖身";
     if (filter === "談場") return i.type === "談場" || i.type === "談場未到";
     return i.type === filter;
   };
@@ -2311,11 +2442,11 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
   const isDerivedMeetingPlanLine = (i) => i.fromMeetingId != null && String(i.fromMeetingId).trim() !== "";
   const timelineListItems = filteredItems.filter(i => !isDerivedMeetingPlanLine(i));
 
-  const TIMELINE_STAT_TYPES = ["上線會議", "暖身／實體暖身", "追蹤", "規劃", "談場", "團隊活動", "產品課程", "新人啟動"];
+  const TIMELINE_STAT_TYPES = ["上線會議", "實體暖身", "追蹤", "規劃", "談場", "團隊活動", "產品課程", "新人啟動"];
   const monthStatsPrefix = `${calMonth.y}-${String(calMonth.m + 1).padStart(2, "0")}`;
   const monthStatsItems = calendarItems.filter(i => i.date && String(i.date).startsWith(monthStatsPrefix));
   const monthStatBucket = (t) => {
-    if (t === "暖身" || t === "實體暖身") return "暖身／實體暖身";
+    if (t === "暖身" || t === "實體暖身") return "實體暖身";
     if (t === "談場未到") return "談場";
     return t || "其他";
   };
@@ -2332,43 +2463,55 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
       .map((t) => ({ type: t, count: monthTypeCounts[t] })),
   ];
 
-  const openNew = () => { setEditData({id:uid(),date:new Date().toISOString().slice(0,10),time:nowHms(),partnerId:"",type:"暖身",title:"暖身",content:"",status:"待執行",tags:"",partnerPlan:"",actionItems:"",quote:""}); setPartnerSearch(""); setShowForm(true); };
-  const saveItem = () => {
+  const partnersTLRef = useRef(partners);
+  partnersTLRef.current = partners;
+  const interactionsTLRef = useRef(interactions);
+  interactionsTLRef.current = interactions;
+  const timelineSaveTimer = useRef(null);
+  const scheduleAutosaveTimer = useRef(null);
+
+  const flushTimelineItemNow = useCallback((raw) => {
+    if (!raw?.id) return;
+    if (!interactionDraftIsPersistable(raw, interactionsTLRef.current)) return;
     const entry = {
-      ...editData,
-      time: normalizeTime(editData.time),
-      tags: editData.tags ? editData.tags.split(/[、,，]/).map(t => t.trim()).filter(Boolean) : [],
-      partnerId: editData.type === "上線會議" ? "" : (editData.partnerId || ""),
+      ...raw,
+      time: normalizeTime(raw.time),
+      tags: raw.tags ? String(raw.tags).split(/[、,，]/).map((t) => t.trim()).filter(Boolean) : [],
+      partnerId: raw.type === "上線會議" ? "" : (raw.partnerId || ""),
     };
     if (entry.type === "上線會議") entry.actionItems = "";
-    if (entry.type === "上線會議") {
-      const unmatched = getUnmatchedMeetingPlanLines(entry.partnerPlan, partners);
-      if (unmatched.length > 0) {
-        const ok = window.confirm(`以下 ${unmatched.length} 行未匹配到夥伴姓名，將不會同步到特定夥伴，但仍會保留在行程紀錄：\n\n- ${unmatched.join("\n- ")}\n\n是否仍要儲存？`);
-        if (!ok) return;
-      }
-    }
     setInteractions((prev) => {
+      const pool = partnersTLRef.current;
       let next = prev.find((i) => i.id === entry.id) ? prev.map((i) => (i.id === entry.id ? entry : i)) : [...prev, entry];
       if (entry.type === "上線會議") {
         next = removeInteractionsSyncedFromMeeting(next, entry.id);
-        next = [...next, ...buildMeetingPlanLineEntries(entry, partners)];
+        next = [...next, ...buildMeetingPlanLineEntries(entry, pool)];
       }
+      interactionsTLRef.current = next;
       return next;
     });
-    const field = scheduleFieldForType(entry.type);
-    if (field && entry.partnerId) {
-      setPartners((prev) =>
-        prev.map((p) => {
-          if (p.id !== entry.partnerId) return p;
-          const cur = parseMultiYmdList(p[field]);
-          if (!cur.includes(entry.date)) cur.push(entry.date);
-          cur.sort();
-          return { ...p, [field]: cur.join("、") };
-        })
-      );
-    }
+    syncPartnerFieldFromInteraction(entry, setPartners);
+  }, [setInteractions, setPartners]);
+
+  useEffect(() => {
+    if (!showForm || !editData) return;
+    if (!interactionDraftIsPersistable(editData, interactionsTLRef.current)) return;
+    if (timelineSaveTimer.current) clearTimeout(timelineSaveTimer.current);
+    timelineSaveTimer.current = setTimeout(() => {
+      flushTimelineItemNow(editData);
+    }, 320);
+    return () => {
+      if (timelineSaveTimer.current) clearTimeout(timelineSaveTimer.current);
+    };
+  }, [showForm, editData, flushTimelineItemNow]);
+
+  const openNew = () => { setEditData({id:uid(),date:new Date().toISOString().slice(0,10),time:nowHms(),partnerId:"",type:"暖身",title:"暖身",content:"",status:"待執行",tags:"",partnerPlan:"",actionItems:"",quote:""}); setPartnerSearch(""); setShowForm(true); };
+  const closeTimelineForm = () => {
+    if (editData) flushTimelineItemNow(editData);
     setShowForm(false);
+  };
+  const saveItem = () => {
+    closeTimelineForm();
   };
   const del = (id) => {
     setInteractions((prev) => {
@@ -2394,31 +2537,48 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
       originalYmd: it.date,
     });
   };
+  const applyScheduleDraftToPartners = useCallback((draft) => {
+    if (!draft?.partnerId) return;
+    const toField = scheduleFieldForType(draft.type);
+    if (!toField) return;
+    const orig = draft.originalYmd ?? draft.date;
+    const newYmd = String(draft.date || "").trim();
+    if (!isYmd(newYmd)) return;
+    setPartners((prev) =>
+      prev.map((p) => {
+        if (p.id !== draft.partnerId) return p;
+        const fromField = draft.fromField;
+        const updated = { ...p };
+        if (fromField === toField) {
+          const list = parseMultiYmdList(p[fromField]);
+          const nextList = list.map((d) => (d === orig ? newYmd : d)).filter((d) => isYmd(d));
+          updated[toField] = normalizeMultiYmdStorage(nextList.join("、"));
+        } else {
+          updated[fromField] = removeOneYmdFromField(p[fromField], orig);
+          const toList = parseMultiYmdList(updated[toField]);
+          if (!toList.includes(newYmd)) toList.push(newYmd);
+          toList.sort();
+          updated[toField] = toList.join("、");
+        }
+        return updated;
+      })
+    );
+  }, [setPartners]);
+
+  useEffect(() => {
+    if (!scheduleDraft) return;
+    if (scheduleAutosaveTimer.current) clearTimeout(scheduleAutosaveTimer.current);
+    scheduleAutosaveTimer.current = setTimeout(() => {
+      applyScheduleDraftToPartners(scheduleDraft);
+    }, 280);
+    return () => {
+      if (scheduleAutosaveTimer.current) clearTimeout(scheduleAutosaveTimer.current);
+    };
+  }, [scheduleDraft, applyScheduleDraftToPartners]);
+
   const saveSchedule = () => {
     if (!scheduleDraft?.partnerId) return;
-    const toField = scheduleFieldForType(scheduleDraft.type);
-    if (!toField) return;
-    const orig = scheduleDraft.originalYmd ?? scheduleDraft.date;
-    const newYmd = String(scheduleDraft.date || "").trim();
-    if (!isYmd(newYmd)) return;
-    const next = partners.map((p) => {
-      if (p.id !== scheduleDraft.partnerId) return p;
-      const fromField = scheduleDraft.fromField;
-      const updated = { ...p };
-      if (fromField === toField) {
-        const list = parseMultiYmdList(p[fromField]);
-        const nextList = list.map((d) => (d === orig ? newYmd : d)).filter((d) => isYmd(d));
-        updated[toField] = normalizeMultiYmdStorage(nextList.join("、"));
-      } else {
-        updated[fromField] = removeOneYmdFromField(p[fromField], orig);
-        const toList = parseMultiYmdList(updated[toField]);
-        if (!toList.includes(newYmd)) toList.push(newYmd);
-        toList.sort();
-        updated[toField] = toList.join("、");
-      }
-      return updated;
-    });
-    setPartners(next);
+    applyScheduleDraftToPartners(scheduleDraft);
     setScheduleDraft(null);
     setSelected(null);
   };
@@ -2642,7 +2802,8 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
       )}
 
       {scheduleDraft && (
-        <Modal title="編輯行程（來自人脈基本資料）" onClose={()=>setScheduleDraft(null)}>
+        <Modal title="編輯行程（來自人脈基本資料）" onClose={()=>{ applyScheduleDraftToPartners(scheduleDraft); setScheduleDraft(null); setSelected(null); }} closeOnOverlayClick={false}>
+          <div className="text-xs text-muted mb-10" style={{lineHeight:1.6}}>變更約 0.3 秒後寫入人脈資料。</div>
           <div className="form-row">
             <div className="form-group">
               <label className="label">類型</label>
@@ -2656,15 +2817,15 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
             </div>
           </div>
           <div className="flex gap-8 mt-12">
-            <button className="btn btn-gold" onClick={saveSchedule}>儲存</button>
-            <button className="btn btn-danger" onClick={deleteSchedule}>清除此日期</button>
-            <button className="btn btn-ghost" onClick={()=>setScheduleDraft(null)}>取消</button>
+            <button type="button" className="btn btn-gold" onClick={saveSchedule}>完成</button>
+            <button type="button" className="btn btn-danger" onClick={deleteSchedule}>清除此日期</button>
           </div>
         </Modal>
       )}
 
       {showForm&&editData&&(
-        <Modal title={`${interactions.find(i=>i.id===editData.id)?"編輯":"新增"}紀錄`} onClose={()=>setShowForm(false)} wide maxWidth={editData.type==="上線會議"?780:640}>
+        <Modal title={`${interactions.find(i=>i.id===editData.id)?"編輯":"新增"}紀錄`} onClose={closeTimelineForm} closeOnOverlayClick={false} wide maxWidth={editData.type==="上線會議"?780:640}>
+          <div className="text-xs text-muted mb-10" style={{lineHeight:1.6}}>內容約 0.3 秒自動儲存；關閉時會再存一次。</div>
           {editData.type==="上線會議"? (
             <div className="form-row-meeting-head">
               <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={editData.date} onChange={e=>setEditData({...editData,date:e.target.value})}/></div>
@@ -2753,7 +2914,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
             <div className="form-group"><label className="label">狀態</label><select className="input" value={editData.status} onChange={e=>setEditData({...editData,status:e.target.value})}>{["待執行","已完成"].map(s=><option key={s}>{s}</option>)}</select></div>
             <div className="form-group"><label className="label">標籤</label><input className="input" value={editData.tags} onChange={e=>setEditData({...editData,tags:e.target.value})}/></div>
           </div>
-          <div className="flex gap-8 mt-8"><button className="btn btn-gold" onClick={saveItem}>儲存</button><button className="btn btn-ghost" onClick={()=>setShowForm(false)}>取消</button></div>
+          <div className="flex gap-8 mt-8"><button type="button" className="btn btn-gold" onClick={saveItem}>完成</button></div>
         </Modal>
       )}
     </div>
@@ -2910,7 +3071,7 @@ function Playbook({ playbook, setPlaybook }) {
         ))}
       </div>
       {showForm&&(
-        <Modal title="新增 / 編輯情境" onClose={()=>setShowForm(false)} wide>
+        <Modal title="新增 / 編輯情境" onClose={()=>setShowForm(false)} closeOnOverlayClick={false} wide>
           <div className="form-row">
             <div className="form-group"><label className="label">分類</label><input className="input" value={draft.category} onChange={e=>setDraft({...draft,category:e.target.value})} placeholder="開口邀約"/></div>
             <div className="form-group"><label className="label">標籤</label><input className="input" value={draft.tags} onChange={e=>setDraft({...draft,tags:e.target.value})}/></div>
@@ -2946,7 +3107,7 @@ function Playbook({ playbook, setPlaybook }) {
               已自動儲存：<span className="mono">{new Date(lastAutosaveAt).toLocaleTimeString("zh-TW")}</span>
             </div>
           )}
-          <div className="flex gap-8 mt-12"><button className="btn btn-gold" onClick={save}>儲存</button><button className="btn btn-ghost" onClick={()=>setShowForm(false)}>取消</button></div>
+          <div className="flex gap-8 mt-12"><button type="button" className="btn btn-gold" onClick={()=>setShowForm(false)}>完成</button></div>
         </Modal>
       )}
     </div>
@@ -3141,6 +3302,32 @@ function AICoach({ partners, interactions, todos }) {
 function QuotesTab({ quotes, setQuotes }) {
   const [showForm, setShowForm] = useState(false);
   const [draft, setDraft] = useState({id:"",text:"",author:"",date:new Date().toISOString().slice(0,10)});
+  const quotesRef = useRef(quotes);
+  quotesRef.current = quotes;
+  const quoteSaveTimer = useRef(null);
+
+  useEffect(() => {
+    if (!showForm || !draft?.id) return;
+    const hasAny = String(draft.text || "").trim() || String(draft.author || "").trim();
+    const exists = quotesRef.current.some((q) => q.id === draft.id);
+    if (!exists && !hasAny) return;
+    if (quoteSaveTimer.current) clearTimeout(quoteSaveTimer.current);
+    quoteSaveTimer.current = setTimeout(() => {
+      const entry = {
+        id: draft.id,
+        text: draft.text || "",
+        author: draft.author || "",
+        date: draft.date || new Date().toISOString().slice(0, 10),
+      };
+      const list = quotesRef.current;
+      const next = list.find((q) => q.id === entry.id) ? list.map((q) => (q.id === entry.id ? entry : q)) : [...list, entry];
+      setQuotes(next);
+    }, 300);
+    return () => {
+      if (quoteSaveTimer.current) clearTimeout(quoteSaveTimer.current);
+    };
+  }, [showForm, draft, setQuotes]);
+
   return (
     <div>
       <div className="flex items-center justify-between mb-14">
@@ -3157,13 +3344,14 @@ function QuotesTab({ quotes, setQuotes }) {
         ))}
       </div>
       {showForm&&(
-        <Modal title="新增金句" onClose={()=>setShowForm(false)}>
+        <Modal title="新增金句" onClose={()=>setShowForm(false)} closeOnOverlayClick={false}>
+          <div className="text-xs text-muted mb-10" style={{lineHeight:1.6}}>約 0.3 秒後自動儲存。</div>
           <div className="form-group"><label className="label">金句內容 *</label><textarea className="input" style={{minHeight:80}} value={draft.text} onChange={e=>setDraft({...draft,text:e.target.value})}/></div>
           <div className="form-row">
             <div className="form-group"><label className="label">來源 / 作者</label><input className="input" value={draft.author} onChange={e=>setDraft({...draft,author:e.target.value})}/></div>
             <div className="form-group"><label className="label">日期</label><input type="date" className="input" value={draft.date} onChange={e=>setDraft({...draft,date:e.target.value})}/></div>
           </div>
-          <div className="flex gap-8 mt-8"><button className="btn btn-gold" onClick={()=>{setQuotes([...quotes,draft]);setShowForm(false);}}>儲存</button><button className="btn btn-ghost" onClick={()=>setShowForm(false)}>取消</button></div>
+          <div className="flex gap-8 mt-8"><button type="button" className="btn btn-gold" onClick={()=>setShowForm(false)}>完成</button></div>
         </Modal>
       )}
     </div>
@@ -3171,10 +3359,10 @@ function QuotesTab({ quotes, setQuotes }) {
 }
 
 // ─── Modal ────────────────────────────────────────────────────────
-function Modal({ title, children, onClose, wide, maxWidth }) {
+function Modal({ title, children, onClose, wide, maxWidth, closeOnOverlayClick = true }) {
   const modalMw = maxWidth != null ? maxWidth : (wide ? 640 : 500);
   return (
-    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div className="modal-overlay" onClick={e=>closeOnOverlayClick && e.target===e.currentTarget&&onClose()}>
       <div className="modal" style={{ maxWidth: modalMw }}>
         <div className="modal-header">
           <h3 style={{fontFamily:"'Playfair Display',serif",color:var_gold,fontSize:17}}>{title}</h3>
