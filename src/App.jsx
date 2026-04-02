@@ -155,8 +155,9 @@ const nowHms = () => {
   return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`;
 };
 const toMsDT = (date, time) => new Date(`${date}T${normalizeTime(time)}`).getTime();
-const SCHEDULE_TYPES = ["談場","團隊活動","實體暖身","產品課程"];
-const scheduleFieldForType = (t) => ({ 談場: "dateTalkVenue", 團隊活動: "dateTeamActivity", 實體暖身: "dateWarmupPhysical", 產品課程: "dateProductCourse" }[t] || "");
+const SCHEDULE_TYPES = ["談場", "談場未到", "團隊活動", "實體暖身", "產品課程"];
+const scheduleFieldForType = (t) =>
+  ({ 談場: "dateTalkVenue", 談場未到: "dateTalkVenueNoShow", 團隊活動: "dateTeamActivity", 實體暖身: "dateWarmupPhysical", 產品課程: "dateProductCourse" }[t] || "");
 
 /** 人脈 CSV：第一列標題對應（Excel 另存 UTF-8 CSV，逗號或 TAB 皆可） */
 const PARTNER_CSV_COLUMNS_DOC = [
@@ -250,6 +251,60 @@ function parsePartnerDateCell(raw) {
   return "";
 }
 
+const isYmd = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
+
+/** 夥伴行程欄位：多個 YYYY-MM-DD，逗號換行頓號直線分隔（儲存以頓號連接） */
+function parseMultiYmdList(raw) {
+  if (raw == null || String(raw).trim() === "") return [];
+  const chunks = String(raw)
+    .trim()
+    .split(/(?:\s*[,，、|]\s*|\s*\n\s*)/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const seen = new Set();
+  const out = [];
+  for (const c of chunks) {
+    if (isYmd(c) && !seen.has(c)) {
+      seen.add(c);
+      out.push(c);
+    }
+  }
+  out.sort();
+  return out;
+}
+
+function normalizeMultiYmdStorage(raw) {
+  return parseMultiYmdList(raw).join("、");
+}
+
+function removeOneYmdFromField(raw, ymd) {
+  return parseMultiYmdList(raw).filter((d) => d !== ymd).join("、");
+}
+
+function formatPartnerMultiDates(raw) {
+  const list = parseMultiYmdList(raw);
+  if (list.length === 0) return "";
+  return list.map((d) => fmtFullDate(d)).join("、");
+}
+
+/** 表單／CSV：多行或逗號分隔，單段交給 parsePartnerDateCell */
+function normalizePartnerScheduleFieldInput(raw) {
+  const t = String(raw ?? "").trim();
+  if (!t) return "";
+  const chunks = t.split(/(?:\s*[,，、|]\s*|\s*\n\s*)/).map((x) => x.trim()).filter(Boolean);
+  const seen = new Set();
+  const out = [];
+  for (const c of chunks) {
+    const one = parsePartnerDateCell(c);
+    if (one && isYmd(one) && !seen.has(one)) {
+      seen.add(one);
+      out.push(one);
+    }
+  }
+  out.sort();
+  return out.join("、");
+}
+
 function normalizeImportedRole(r) {
   let x = String(r ?? "").trim();
   if (x === "夥伴") x = "已加入";
@@ -304,9 +359,11 @@ function parsePartnerCsvText(text) {
       age,
       occupation: String(row.occupation ?? "").trim(),
       salary: String(row.salary ?? "").trim(),
-      dateTalkVenue: parsePartnerDateCell(row.dateTalkVenue),
+      dateTalkVenue: normalizePartnerScheduleFieldInput(row.dateTalkVenue),
+      dateTalkVenueNoShow: "",
       dateTeamActivity: "",
       dateWarmupPhysical: "",
+      dateProductCourse: "",
       costs: [],
       abcNote: ABC_TEMPLATE,
       joined: new Date().toISOString().slice(0, 10),
@@ -570,6 +627,16 @@ function partnerIdForPlanTitle(title, ordered) {
   return "";
 }
 
+/** 比對夥伴時只用「該日區塊＋行前綴」，勿含後方共用計畫／待選名單（避免 title 含「詩涵」全誤掛） */
+function partnerLookupTextForPlanMarker(line, markers, i) {
+  if (i === 0) {
+    return line.slice(0, markerVisualEnd(line, markers[0])).trim();
+  }
+  const a = planLineSegmentSliceStart(line, markers[i].start);
+  const b = markerVisualEnd(line, markers[i]);
+  return line.slice(a, b).trim();
+}
+
 /** 該行是否包含「可指定到某一天」的日期字樣（用于月曆：無則不擠在開會當日格子內） */
 function lineHasExplicitPlanDateInText(line) {
   const s = String(line || "");
@@ -583,6 +650,7 @@ function lineHasExplicitPlanDateInText(line) {
 function inferPlanLineInteractionType(line) {
   const s = String(line || "");
   if (s.includes("團隊活動")) return "團隊活動";
+  if (s.includes("談場未到") || s.includes("未到場") || /沒出現|爽約/.test(s)) return "談場未到";
   if (s.includes("談場")) return "談場";
   if (s.includes("實體暖身")) return "實體暖身";
   if (s.includes("產品課程")) return "產品課程";
@@ -640,7 +708,7 @@ function buildMeetingPlanLineEntries(meeting, partners) {
         const dateHead = line.slice(blkStart, blkEnd).trimEnd();
         if (!dateHead) continue;
         const title = dateHead + commonSuffix;
-        chunks.push(oneEntry(title, partnerIdForPlanTitle(title, ordered)));
+        chunks.push(oneEntry(title, partnerIdForPlanTitle(dateHead, ordered)));
       }
       return chunks;
     }
@@ -651,7 +719,8 @@ function buildMeetingPlanLineEntries(meeting, partners) {
       const segmentText = line.slice(segStart, segEnd).trim();
       if (!segmentText) continue;
       const title = i === 0 ? segmentText : `${linePrefix}${segmentText}`;
-      chunks.push(oneEntry(title, partnerIdForPlanTitle(title, ordered)));
+      const partnerLookup = partnerLookupTextForPlanMarker(line, markers, i);
+      chunks.push(oneEntry(title, partnerIdForPlanTitle(partnerLookup, ordered)));
     }
     return chunks;
   });
@@ -780,7 +849,7 @@ const css = `
   .timeline-item:hover{background:var(--bg3)}
   .tl-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;margin-top:5px}
   .type-暖身{color:var(--blue)}.type-追蹤{color:var(--gold)}.type-規劃{color:var(--green)}.type-上線會議{color:var(--purple)}.type-新人啟動{color:#0f766e}
-  .tl-dot.type-暖身{background:var(--blue)}.tl-dot.type-追蹤{background:var(--gold)}.tl-dot.type-規劃{background:var(--green)}.tl-dot.type-上線會議{background:var(--purple)}.tl-dot.type-談場{background:#c2410c}.tl-dot.type-團隊活動{background:#047857}.tl-dot.type-實體暖身{background:#4338ca}.tl-dot.type-產品課程{background:#6d28d9}.tl-dot.type-新人啟動{background:#0f766e}
+  .tl-dot.type-暖身{background:var(--blue)}.tl-dot.type-追蹤{background:var(--gold)}.tl-dot.type-規劃{background:var(--green)}.tl-dot.type-上線會議{background:var(--purple)}.tl-dot.type-談場{background:#c2410c}.tl-dot.type-談場未到{background:#9a3412}.tl-dot.type-團隊活動{background:#047857}.tl-dot.type-實體暖身{background:#4338ca}.tl-dot.type-產品課程{background:#6d28d9}.tl-dot.type-新人啟動{background:#0f766e}
   .status-badge{font-size:10px;padding:2px 6px;border-radius:4px;font-family:'DM Mono',monospace}
   .status-已完成{background:#d1fae5;color:#065f46}.status-待執行{background:var(--gold-light);color:var(--gold)}
 
@@ -822,6 +891,7 @@ const css = `
   .cal-event.type-規劃{background:#f0fdf4;color:var(--green)}
   .cal-event.type-上線會議{background:#f5f3ff;color:var(--purple)}
   .cal-event.type-談場{background:#fff7ed;color:#c2410c}
+  .cal-event.type-談場未到{background:#ffedd5;color:#9a3412;border:1px dashed #fdba74}
   .cal-event.type-團隊活動{background:#ecfdf5;color:#047857}
   .cal-event.type-實體暖身{background:#eef2ff;color:#4338ca}
   .cal-event.type-產品課程{background:#faf5ff;color:#6d28d9}
@@ -837,6 +907,7 @@ const css = `
   .cal-filter-pill--pending{background:var(--gold-light);border-color:var(--gold-border);color:var(--gold)}
   .cal-filter-pill--meet{background:#f5f3ff;border-color:#c4b5fd;color:var(--purple)}
   .cal-filter-pill--warm{background:#eff6ff;border-color:#bfdbfe;color:var(--blue)}
+  .cal-filter-pill--warmphy{background:linear-gradient(135deg,#eff6ff 0%,#eef2ff 100%);border-color:#a5b4fc;color:#3730a3}
   .cal-filter-pill--follow{background:var(--gold-light);border-color:var(--gold-border);color:var(--gold)}
   .cal-filter-pill--plan{background:#f0fdf4;border-color:#86efac;color:var(--green)}
   .cal-filter-pill--talk{background:#fff7ed;border-color:#fdba74;color:#c2410c}
@@ -901,6 +972,7 @@ export default function App() {
         dateTeamActivity: p.dateTeamActivity || "",
         dateWarmupPhysical: p.dateWarmupPhysical || "",
         dateProductCourse: p.dateProductCourse || "",
+        dateTalkVenueNoShow: p.dateTalkVenueNoShow || "",
         warmupStalled: Boolean(p.warmupStalled),
       }));
       setPartners(migratedPartners);
@@ -1014,16 +1086,19 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
   );
   const partnerScheduleEvents = partners
     .filter(p => p.role !== "上線")
-    .flatMap((p) => ([
-      p.dateTalkVenue ? { partnerId: p.id, type: "談場", date: p.dateTalkVenue } : null,
-      p.dateTeamActivity ? { partnerId: p.id, type: "團隊活動", date: p.dateTeamActivity } : null,
-      p.dateWarmupPhysical ? { partnerId: p.id, type: "實體暖身", date: p.dateWarmupPhysical } : null,
-      p.dateProductCourse ? { partnerId: p.id, type: "產品課程", date: p.dateProductCourse } : null,
-    ])).filter(Boolean)
+    .flatMap((p) => {
+      const rows = [];
+      parseMultiYmdList(p.dateTalkVenue).forEach((d) => rows.push({ partnerId: p.id, type: "談場", date: d }));
+      parseMultiYmdList(p.dateTalkVenueNoShow).forEach((d) => rows.push({ partnerId: p.id, type: "談場未到", date: d }));
+      parseMultiYmdList(p.dateTeamActivity).forEach((d) => rows.push({ partnerId: p.id, type: "團隊活動", date: d }));
+      parseMultiYmdList(p.dateWarmupPhysical).forEach((d) => rows.push({ partnerId: p.id, type: "實體暖身", date: d }));
+      parseMultiYmdList(p.dateProductCourse).forEach((d) => rows.push({ partnerId: p.id, type: "產品課程", date: d }));
+      return rows;
+    })
     .filter(e => !interactionScheduleSet.has(`${e.partnerId}|${e.type}|${e.date}`));
   const mergedTimelineForStats = [...interactions, ...partnerScheduleEvents];
   const timelineCounts = {
-    talk: mergedTimelineForStats.filter(i => i.type === "談場").length,
+    talk: mergedTimelineForStats.filter(i => i.type === "談場" || i.type === "談場未到").length,
     warmupPhysical: mergedTimelineForStats.filter(i => i.type === "實體暖身").length,
     teamActivity: mergedTimelineForStats.filter(i => i.type === "團隊活動").length,
     meeting: mergedTimelineForStats.filter(i => i.type === "上線會議").length,
@@ -1370,13 +1445,13 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       return fv === "全部" ? true : getFieldValue(p, f.key) === fv;
     }))
     .filter(p => {
-      const hasTeamActivity = String(p?.dateTeamActivity || "").trim() !== "";
+      const hasTeamActivity = parseMultiYmdList(p?.dateTeamActivity).length > 0;
       if (fieldFilters.teamActivityFilled === "有填寫") return hasTeamActivity;
       if (fieldFilters.teamActivityFilled === "空白") return !hasTeamActivity;
       return true;
     })
     .filter(p => {
-      const hasWarmupPhysical = String(p?.dateWarmupPhysical || "").trim() !== "";
+      const hasWarmupPhysical = parseMultiYmdList(p?.dateWarmupPhysical).length > 0;
       if (fieldFilters.warmupPhysicalFilled === "有填寫") return hasWarmupPhysical;
       if (fieldFilters.warmupPhysicalFilled === "空白") return !hasWarmupPhysical;
       return true;
@@ -1452,7 +1527,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     }
   };
 
-  const openNew = () => { setEditData({id:uid(),name:"",role:"暖身中",avatar:"",photo:"",attribute:"",painPoint:"",region:"",vacation:"",memo:"",gender:"",relation:"",age:"",occupation:"",salary:"",dateTalkVenue:"",dateTeamActivity:"",dateWarmupPhysical:"",dateProductCourse:"",warmupStalled:false,costs:[],abcNote:ABC_TEMPLATE,joined:new Date().toISOString().slice(0,10)}); setShowForm(true); };
+  const openNew = () => { setEditData({id:uid(),name:"",role:"暖身中",avatar:"",photo:"",attribute:"",painPoint:"",region:"",vacation:"",memo:"",gender:"",relation:"",age:"",occupation:"",salary:"",dateTalkVenue:"",dateTalkVenueNoShow:"",dateTeamActivity:"",dateWarmupPhysical:"",dateProductCourse:"",warmupStalled:false,costs:[],abcNote:ABC_TEMPLATE,joined:new Date().toISOString().slice(0,10)}); setShowForm(true); };
   const openEdit = (p) => {
     const nextRole = p.role === "夥伴" ? "已加入" : p.role;
     setEditData({
@@ -1469,6 +1544,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       occupation: p.occupation || "",
       salary: p.salary == null || p.salary === "" ? "" : String(p.salary),
       dateTalkVenue: p.dateTalkVenue || "",
+      dateTalkVenueNoShow: p.dateTalkVenueNoShow || "",
       dateTeamActivity: p.dateTeamActivity || "",
       dateWarmupPhysical: p.dateWarmupPhysical || "",
       dateProductCourse: p.dateProductCourse || "",
@@ -1484,10 +1560,11 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       photo:editData.photo||"",
       age: editData.age === "" ? "" : +editData.age,
       salary: String(editData.salary ?? "").trim(),
-      dateTalkVenue: String(editData.dateTalkVenue ?? "").trim(),
-      dateTeamActivity: String(editData.dateTeamActivity ?? "").trim(),
-      dateWarmupPhysical: String(editData.dateWarmupPhysical ?? "").trim(),
-      dateProductCourse: String(editData.dateProductCourse ?? "").trim(),
+      dateTalkVenue: normalizePartnerScheduleFieldInput(editData.dateTalkVenue),
+      dateTalkVenueNoShow: normalizePartnerScheduleFieldInput(editData.dateTalkVenueNoShow),
+      dateTeamActivity: normalizePartnerScheduleFieldInput(editData.dateTeamActivity),
+      dateWarmupPhysical: normalizePartnerScheduleFieldInput(editData.dateWarmupPhysical),
+      dateProductCourse: normalizePartnerScheduleFieldInput(editData.dateProductCourse),
       warmupStalled: Boolean(editData.warmupStalled),
     };
     const next=partners.find(p=>p.id===entry.id)?partners.map(p=>p.id===entry.id?entry:p):[...partners,entry];
@@ -1775,10 +1852,11 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
                   ["薪資", selected.salary != null && String(selected.salary).trim() !== "" ? String(selected.salary) : ""],
                   ["加入名單", selected.joined ? fmtFullDate(selected.joined) : ""],
                   ["暖身卡關註記", selected.warmupStalled ? "是" : ""],
-                  ["談場", selected.dateTalkVenue ? fmtFullDate(selected.dateTalkVenue) : ""],
-                  ["團隊活動", selected.dateTeamActivity ? fmtFullDate(selected.dateTeamActivity) : ""],
-                  ["實體暖身", selected.dateWarmupPhysical ? fmtFullDate(selected.dateWarmupPhysical) : ""],
-                  ["產品課程", selected.dateProductCourse ? fmtFullDate(selected.dateProductCourse) : ""],
+                  ["談場", formatPartnerMultiDates(selected.dateTalkVenue)],
+                  ["談場未到", formatPartnerMultiDates(selected.dateTalkVenueNoShow)],
+                  ["團隊活動", formatPartnerMultiDates(selected.dateTeamActivity)],
+                  ["實體暖身", formatPartnerMultiDates(selected.dateWarmupPhysical)],
+                  ["產品課程", formatPartnerMultiDates(selected.dateProductCourse)],
                 ].map(([l, v]) => (
                   <div key={l} className="info-row">
                     <div className="info-label">{l}</div>
@@ -1856,7 +1934,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
               <div className="form-group"><label className="label">時間</label><input type="time" step="1" className="input" value={normalizeTime(interactionDraft.time)} onChange={e=>setInteractionDraft({...interactionDraft,time:e.target.value})}/></div>
               <div className="form-group"><label className="label">類型</label>
                 <select className="input" value={interactionDraft.type} onChange={e=>setInteractionDraft({...interactionDraft,type:e.target.value})}>
-                  {["暖身","追蹤","規劃","上線會議","談場","團隊活動","實體暖身","產品課程","新人啟動"].map(t=><option key={t}>{t}</option>)}
+                  {["暖身","追蹤","規劃","上線會議","談場","談場未到","團隊活動","實體暖身","產品課程","新人啟動"].map(t=><option key={t}>{t}</option>)}
                 </select>
               </div>
               <div className="form-group"><label className="label">標題 *</label><input className="input" value={interactionDraft.title} onChange={e=>setInteractionDraft({...interactionDraft,title:e.target.value})}/></div>
@@ -1868,7 +1946,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
                 <div className="form-group"><label className="label">時間（時:分:秒）</label><input type="time" step="1" className="input" value={normalizeTime(interactionDraft.time)} onChange={e=>setInteractionDraft({...interactionDraft,time:e.target.value})}/></div>
                 <div className="form-group"><label className="label">類型</label>
                   <select className="input" value={interactionDraft.type} onChange={e=>setInteractionDraft({...interactionDraft,type:e.target.value})}>
-                    {["暖身","追蹤","規劃","上線會議","談場","團隊活動","實體暖身","產品課程","新人啟動"].map(t=><option key={t}>{t}</option>)}
+                    {["暖身","追蹤","規劃","上線會議","談場","談場未到","團隊活動","實體暖身","產品課程","新人啟動"].map(t=><option key={t}>{t}</option>)}
                   </select>
                 </div>
               </div>
@@ -2010,13 +2088,27 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             <div className="form-group"><label className="label">職業</label><input className="input" value={editData.occupation} onChange={e=>setEditData({...editData,occupation:e.target.value})}/></div>
           </div>
           <div className="form-group"><label className="label">薪資</label><input type="text" className="input" value={editData.salary} onChange={e=>setEditData({...editData,salary:e.target.value})} placeholder="例：NT$45,000、5萬/月、面議"/></div>
-          <div className="form-row">
-            <div className="form-group"><label className="label">談場（日期）</label><input type="date" className="input" value={editData.dateTalkVenue || ""} onChange={e=>setEditData({...editData,dateTalkVenue:e.target.value})}/></div>
-            <div className="form-group"><label className="label">團隊活動</label><input type="date" className="input" value={editData.dateTeamActivity || ""} onChange={e=>setEditData({...editData,dateTeamActivity:e.target.value})}/></div>
+          <div className="form-group">
+            <label className="label">談場（日期）</label>
+            <textarea className="input" style={{minHeight:64}} value={editData.dateTalkVenue || ""} onChange={e=>setEditData({...editData,dateTalkVenue:e.target.value})} placeholder={"每行一個，或逗號／頓號分隔\n例：2026-04-01、2026-04-15"}/>
+          </div>
+          <div className="form-group">
+            <label className="label">談場未到（約了沒出現）</label>
+            <textarea className="input" style={{minHeight:64}} value={editData.dateTalkVenueNoShow || ""} onChange={e=>setEditData({...editData,dateTalkVenueNoShow:e.target.value})} placeholder={"記錄應到未到場次\n例：2026-04-02"}/>
           </div>
           <div className="form-row">
-            <div className="form-group"><label className="label">實體暖身</label><input type="date" className="input" value={editData.dateWarmupPhysical || ""} onChange={e=>setEditData({...editData,dateWarmupPhysical:e.target.value})}/></div>
-            <div className="form-group"><label className="label">產品課程</label><input type="date" className="input" value={editData.dateProductCourse || ""} onChange={e=>setEditData({...editData,dateProductCourse:e.target.value})}/></div>
+            <div className="form-group">
+              <label className="label">團隊活動</label>
+              <textarea className="input" style={{minHeight:64}} value={editData.dateTeamActivity || ""} onChange={e=>setEditData({...editData,dateTeamActivity:e.target.value})} placeholder={"多個日期同上"}/>
+            </div>
+            <div className="form-group">
+              <label className="label">實體暖身</label>
+              <textarea className="input" style={{minHeight:64}} value={editData.dateWarmupPhysical || ""} onChange={e=>setEditData({...editData,dateWarmupPhysical:e.target.value})} placeholder={"多個日期同上"}/>
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="label">產品課程</label>
+            <textarea className="input" style={{minHeight:64}} value={editData.dateProductCourse || ""} onChange={e=>setEditData({...editData,dateProductCourse:e.target.value})} placeholder={"多個日期同上"}/>
           </div>
           <div className="form-group">
             <label className="label">上傳照片（可選）</label>
@@ -2093,12 +2185,11 @@ const CAL_FILTER_SLUG = {
   全部: "all",
   待執行: "pending",
   上線會議: "meet",
-  暖身: "warm",
+  "暖身／實體暖身": "warmphy",
   追蹤: "follow",
   規劃: "plan",
   談場: "talk",
   團隊活動: "team",
-  實體暖身: "phy",
   產品課程: "course",
   新人啟動: "newbie",
 };
@@ -2109,7 +2200,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
   const [showForm, setShowForm] = useState(false);
   const [editData, setEditData] = useState(null);
   const [selected, setSelected] = useState(null);
-  const [scheduleDraft, setScheduleDraft] = useState(null); // { partnerId, fromField, type, date }
+  const [scheduleDraft, setScheduleDraft] = useState(null); // { partnerId, fromField, type, date, originalYmd }
   const [partnerSearch, setPartnerSearch] = useState("");
   const [calMonth, setCalMonth] = useState(()=>{ const n=new Date(); return {y:n.getFullYear(),m:n.getMonth()}; });
   const [calDayListModal, setCalDayListModal] = useState(null); // { ymd, items }
@@ -2124,7 +2215,6 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
   const getP = (id) => partners.find(p=>p.id===id);
   const nonUplinePartners = partners.filter(p=>p.role!=="上線");
   const filteredPartnerOptions = nonUplinePartners.filter(p => p.name.includes(partnerSearch.trim()));
-  const isYmd = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
   const interactionScheduleSet = new Set(
     interactions
       .filter(i => SCHEDULE_TYPES.includes(i.type) && i.partnerId && i.date)
@@ -2132,52 +2222,75 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
   );
   const partnerScheduleItems = partners
     .filter(p => p.role !== "上線")
-    .flatMap((p) => ([
-      p.dateTalkVenue && isYmd(p.dateTalkVenue) ? {
-        id: `ps-talk-${p.id}`,
-        date: p.dateTalkVenue,
-        time: "00:00:00",
-        partnerId: p.id,
-        type: "談場",
-        title: "談場",
-        status: "",
-        isPartnerSchedule: true,
-        sourceField: "dateTalkVenue",
-      } : null,
-      p.dateTeamActivity && isYmd(p.dateTeamActivity) ? {
-        id: `ps-team-${p.id}`,
-        date: p.dateTeamActivity,
-        time: "00:00:00",
-        partnerId: p.id,
-        type: "團隊活動",
-        title: "團隊活動",
-        status: "",
-        isPartnerSchedule: true,
-        sourceField: "dateTeamActivity",
-      } : null,
-      p.dateWarmupPhysical && isYmd(p.dateWarmupPhysical) ? {
-        id: `ps-warm-${p.id}`,
-        date: p.dateWarmupPhysical,
-        time: "00:00:00",
-        partnerId: p.id,
-        type: "實體暖身",
-        title: "實體暖身",
-        status: "",
-        isPartnerSchedule: true,
-        sourceField: "dateWarmupPhysical",
-      } : null,
-      p.dateProductCourse && isYmd(p.dateProductCourse) ? {
-        id: `ps-course-${p.id}`,
-        date: p.dateProductCourse,
-        time: "00:00:00",
-        partnerId: p.id,
-        type: "產品課程",
-        title: "產品課程",
-        status: "",
-        isPartnerSchedule: true,
-        sourceField: "dateProductCourse",
-      } : null,
-    ])).filter(Boolean)
+    .flatMap((p) => {
+      const items = [];
+      parseMultiYmdList(p.dateTalkVenue).forEach((d) => {
+        items.push({
+          id: `ps-talk-${p.id}-${d}`,
+          date: d,
+          time: "00:00:00",
+          partnerId: p.id,
+          type: "談場",
+          title: "談場",
+          status: "",
+          isPartnerSchedule: true,
+          sourceField: "dateTalkVenue",
+        });
+      });
+      parseMultiYmdList(p.dateTalkVenueNoShow).forEach((d) => {
+        items.push({
+          id: `ps-talkns-${p.id}-${d}`,
+          date: d,
+          time: "00:00:00",
+          partnerId: p.id,
+          type: "談場未到",
+          title: "談場·未到",
+          status: "",
+          isPartnerSchedule: true,
+          sourceField: "dateTalkVenueNoShow",
+        });
+      });
+      parseMultiYmdList(p.dateTeamActivity).forEach((d) => {
+        items.push({
+          id: `ps-team-${p.id}-${d}`,
+          date: d,
+          time: "00:00:00",
+          partnerId: p.id,
+          type: "團隊活動",
+          title: "團隊活動",
+          status: "",
+          isPartnerSchedule: true,
+          sourceField: "dateTeamActivity",
+        });
+      });
+      parseMultiYmdList(p.dateWarmupPhysical).forEach((d) => {
+        items.push({
+          id: `ps-warm-${p.id}-${d}`,
+          date: d,
+          time: "00:00:00",
+          partnerId: p.id,
+          type: "實體暖身",
+          title: "實體暖身",
+          status: "",
+          isPartnerSchedule: true,
+          sourceField: "dateWarmupPhysical",
+        });
+      });
+      parseMultiYmdList(p.dateProductCourse).forEach((d) => {
+        items.push({
+          id: `ps-course-${p.id}-${d}`,
+          date: d,
+          time: "00:00:00",
+          partnerId: p.id,
+          type: "產品課程",
+          title: "產品課程",
+          status: "",
+          isPartnerSchedule: true,
+          sourceField: "dateProductCourse",
+        });
+      });
+      return items;
+    })
     .filter(it => !interactionScheduleSet.has(`${it.partnerId}|${it.type}|${it.date}`));
   /** 月曆：上線會議主紀錄留在開會當日；拆筆僅在它們含「M/D」等明確日期時才出現在對應日期，未寫日期的子筆不堆在開會當日（仍保留在人脈互動／資料） */
   const calendarInteractionRows = interactions.filter((i) => {
@@ -2186,16 +2299,28 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
     return lineHasExplicitPlanDateInText(i.title || "");
   });
   const calendarItems = [...calendarInteractionRows, ...partnerScheduleItems];
-  const filteredItems = filter==="全部"?calendarItems:filter==="待執行"?calendarItems.filter(i=>i.status==="待執行"):calendarItems.filter(i=>i.type===filter);
+  const matchesCalFilter = (i) => {
+    if (filter === "全部") return true;
+    if (filter === "待執行") return i.status === "待執行";
+    if (filter === "暖身／實體暖身") return i.type === "暖身" || i.type === "實體暖身";
+    if (filter === "談場") return i.type === "談場" || i.type === "談場未到";
+    return i.type === filter;
+  };
+  const filteredItems = calendarItems.filter(matchesCalFilter);
   /** 由上線會議拆出的子筆：下方「本月紀錄」不重複列出 */
   const isDerivedMeetingPlanLine = (i) => i.fromMeetingId != null && String(i.fromMeetingId).trim() !== "";
   const timelineListItems = filteredItems.filter(i => !isDerivedMeetingPlanLine(i));
 
-  const TIMELINE_STAT_TYPES = ["上線會議", "暖身", "追蹤", "規劃", "談場", "團隊活動", "實體暖身", "產品課程", "新人啟動"];
+  const TIMELINE_STAT_TYPES = ["上線會議", "暖身／實體暖身", "追蹤", "規劃", "談場", "團隊活動", "產品課程", "新人啟動"];
   const monthStatsPrefix = `${calMonth.y}-${String(calMonth.m + 1).padStart(2, "0")}`;
   const monthStatsItems = calendarItems.filter(i => i.date && String(i.date).startsWith(monthStatsPrefix));
+  const monthStatBucket = (t) => {
+    if (t === "暖身" || t === "實體暖身") return "暖身／實體暖身";
+    if (t === "談場未到") return "談場";
+    return t || "其他";
+  };
   const monthTypeCounts = monthStatsItems.reduce((acc, i) => {
-    const t = i.type || "其他";
+    const t = monthStatBucket(i.type);
     acc[t] = (acc[t] || 0) + 1;
     return acc;
   }, {});
@@ -2233,8 +2358,15 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
     });
     const field = scheduleFieldForType(entry.type);
     if (field && entry.partnerId) {
-      const nextPartners = partners.map(p => (p.id === entry.partnerId ? { ...p, [field]: entry.date } : p));
-      setPartners(nextPartners);
+      setPartners((prev) =>
+        prev.map((p) => {
+          if (p.id !== entry.partnerId) return p;
+          const cur = parseMultiYmdList(p[field]);
+          if (!cur.includes(entry.date)) cur.push(entry.date);
+          cur.sort();
+          return { ...p, [field]: cur.join("、") };
+        })
+      );
     }
     setShowForm(false);
   };
@@ -2254,17 +2386,36 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
   const toggle = (id) => setInteractions((prev) => prev.map(i=>i.id===id?{...i,status:i.status==="已完成"?"待執行":"已完成"}:i));
   const openScheduleEdit = (it) => {
     if (!it?.isPartnerSchedule) return;
-    setScheduleDraft({ partnerId: it.partnerId, fromField: it.sourceField, type: it.type, date: it.date });
+    setScheduleDraft({
+      partnerId: it.partnerId,
+      fromField: it.sourceField,
+      type: it.type,
+      date: it.date,
+      originalYmd: it.date,
+    });
   };
   const saveSchedule = () => {
     if (!scheduleDraft?.partnerId) return;
     const toField = scheduleFieldForType(scheduleDraft.type);
     if (!toField) return;
-    const next = partners.map(p => {
+    const orig = scheduleDraft.originalYmd ?? scheduleDraft.date;
+    const newYmd = String(scheduleDraft.date || "").trim();
+    if (!isYmd(newYmd)) return;
+    const next = partners.map((p) => {
       if (p.id !== scheduleDraft.partnerId) return p;
+      const fromField = scheduleDraft.fromField;
       const updated = { ...p };
-      if (scheduleDraft.fromField && scheduleDraft.fromField !== toField) updated[scheduleDraft.fromField] = "";
-      updated[toField] = scheduleDraft.date || "";
+      if (fromField === toField) {
+        const list = parseMultiYmdList(p[fromField]);
+        const nextList = list.map((d) => (d === orig ? newYmd : d)).filter((d) => isYmd(d));
+        updated[toField] = normalizeMultiYmdStorage(nextList.join("、"));
+      } else {
+        updated[fromField] = removeOneYmdFromField(p[fromField], orig);
+        const toList = parseMultiYmdList(updated[toField]);
+        if (!toList.includes(newYmd)) toList.push(newYmd);
+        toList.sort();
+        updated[toField] = toList.join("、");
+      }
       return updated;
     });
     setPartners(next);
@@ -2273,7 +2424,11 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
   };
   const deleteSchedule = () => {
     if (!scheduleDraft?.partnerId || !scheduleDraft.fromField) return;
-    const next = partners.map(p => (p.id === scheduleDraft.partnerId ? { ...p, [scheduleDraft.fromField]: "" } : p));
+    const ymd = scheduleDraft.originalYmd ?? scheduleDraft.date;
+    const next = partners.map((p) => {
+      if (p.id !== scheduleDraft.partnerId) return p;
+      return { ...p, [scheduleDraft.fromField]: removeOneYmdFromField(p[scheduleDraft.fromField], ymd) };
+    });
     setPartners(next);
     setScheduleDraft(null);
     setSelected(null);
@@ -2468,11 +2623,14 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
               <button className="btn btn-gold btn-sm" onClick={()=>{ openScheduleEdit(selected); }}>編輯</button>
               <button className="btn btn-danger btn-sm" onClick={()=>{
                 const field = selected.sourceField || scheduleFieldForType(selected.type);
-                if (!field || !selected.partnerId) return;
-                const next = partners.map(p => (p.id === selected.partnerId ? { ...p, [field]: "" } : p));
+                if (!field || !selected.partnerId || !selected.date) return;
+                const ymd = selected.date;
+                const next = partners.map(p =>
+                  p.id === selected.partnerId ? { ...p, [field]: removeOneYmdFromField(p[field], ymd) } : p
+                );
                 setPartners(next);
                 setSelected(null);
-              }}>清除日期</button>
+              }}>清除此日期</button>
             </div>
           ) : (
             <div className="flex gap-8">
@@ -2499,7 +2657,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
           </div>
           <div className="flex gap-8 mt-12">
             <button className="btn btn-gold" onClick={saveSchedule}>儲存</button>
-            <button className="btn btn-danger" onClick={deleteSchedule}>清除日期</button>
+            <button className="btn btn-danger" onClick={deleteSchedule}>清除此日期</button>
             <button className="btn btn-ghost" onClick={()=>setScheduleDraft(null)}>取消</button>
           </div>
         </Modal>
@@ -2528,7 +2686,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
                     };
                   })}
                 >
-                  {["暖身","追蹤","規劃","上線會議","談場","團隊活動","實體暖身","產品課程","新人啟動"].map(t=><option key={t}>{t}</option>)}
+                  {["暖身","追蹤","規劃","上線會議","談場","談場未到","團隊活動","實體暖身","產品課程","新人啟動"].map(t=><option key={t}>{t}</option>)}
                 </select>
               </div>
               <div className="form-group"><label className="label">標題 *</label><input className="input" value={editData.title} onChange={e=>setEditData({...editData,title:e.target.value})} placeholder="例：與團隊討論四月進度"/></div>
@@ -2555,7 +2713,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
                       };
                     })}
                   >
-                    {["暖身","追蹤","規劃","上線會議","談場","團隊活動","實體暖身","產品課程","新人啟動"].map(t=><option key={t}>{t}</option>)}
+                    {["暖身","追蹤","規劃","上線會議","談場","談場未到","團隊活動","實體暖身","產品課程","新人啟動"].map(t=><option key={t}>{t}</option>)}
                   </select>
                 </div>
               </div>
