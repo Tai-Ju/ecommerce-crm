@@ -1544,6 +1544,18 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       const aStalled = Boolean(a.warmupStalled);
       const bStalled = Boolean(b.warmupStalled);
       if (aStalled !== bStalled) return aStalled ? 1 : -1; // 暖身卡關者固定置底
+      const joinedKey = (p) => String(p?.joined || "").trim();
+      const cmpJoined = (desc) => {
+        const ja = joinedKey(a);
+        const jb = joinedKey(b);
+        if (!ja && !jb) return 0;
+        if (!ja) return 1;
+        if (!jb) return -1;
+        const c = ja.localeCompare(jb);
+        return desc ? -c : c;
+      };
+      if (sortBy === "joined-desc") return cmpJoined(true);
+      if (sortBy === "joined-asc") return cmpJoined(false);
       if (sortBy === "region-asc") return String(a.region||"").localeCompare(String(b.region||""), "zh-Hant");
       if (sortBy === "region-desc") return String(b.region||"").localeCompare(String(a.region||""), "zh-Hant");
       if (sortBy === "attribute-asc") return String(a.attribute||"").localeCompare(String(b.attribute||""), "zh-Hant");
@@ -1906,6 +1918,8 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
           </select>
           <select className="input input-compact" value={sortBy} onChange={e=>setSortBy(e.target.value)}>
             <option value="default">排序：預設</option>
+            <option value="joined-desc">排序：加入名單（新→舊）</option>
+            <option value="joined-asc">排序：加入名單（舊→新）</option>
             <option value="region-asc">排序：地區 A→Z</option>
             <option value="region-desc">排序：地區 Z→A</option>
             <option value="attribute-asc">排序：屬性 A→Z</option>
