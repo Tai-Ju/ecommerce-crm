@@ -67,8 +67,8 @@ async function save(key, val) {
 const RECRUIT_ROLES = ["邀約拒絕", "談後拒絕", "未加入", "暖身中", "確定談場", "談場延期", "跟進中", "已付訂金", "已加入"];
 // 非上線狀態只保留招募漏斗角色（把「夥伴」視為已加入移除重疊）
 const NON_UPLINE_ROLES = [...RECRUIT_ROLES];
-const COST_TYPES = ["訂金", "買貨", "加盟"];
-const TYPE_COLOR = { 訂金: "#4a90d9", 買貨: "#b8860b", 加盟: "#c0392b" };
+const COST_TYPES = ["訂金", "買貨", "加盟", "活動", "其他"];
+const TYPE_COLOR = { 訂金: "#4a90d9", 買貨: "#b8860b", 加盟: "#c0392b", 活動: "#7c3aed", 其他: "#6b7280" };
 const RECRUIT_COLOR = { 未加入: "#aaa", 暖身中: "#4a90d9", 確定談場: "#b8860b", 談場延期: "#e67e22", 跟進中: "#8b5cf6", 已付訂金: "#f59e0b", 邀約拒絕: "#c0392b", 談後拒絕: "#e74c3c", 已加入: "#27ae60" };
 
 const ABC_TEMPLATE = `C角：
