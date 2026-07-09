@@ -2752,12 +2752,14 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
   const monthPrefix = `${calMonth.y}-${String(calMonth.m+1).padStart(2,"0")}`;
   const monthListRows = [...timelineListItems].filter(i => i.date.startsWith(monthPrefix)).sort(sortByNearToday);
 
-  const TIMELINE_STAT_TYPES = ["上線會議", "實體暖身", "追蹤", "規劃", "談場", "團隊活動", "產品課程", "新人啟動"];
+  const TIMELINE_STAT_TYPES = ["上線會議", "實體暖身", "追蹤", "規劃", "談場", "談場未到", "團隊活動", "產品課程", "新人啟動"];
   const monthStatsPrefix = `${calMonth.y}-${String(calMonth.m + 1).padStart(2, "0")}`;
-  const monthStatsItems = calendarItems.filter(i => i.date && String(i.date).startsWith(monthStatsPrefix));
+  /** 與列表／月曆一致：不計入上線會議拆筆子項，避免統計高於可見筆數 */
+  const monthStatsItems = calendarItems
+    .filter(i => !isDerivedMeetingPlanLine(i))
+    .filter(i => i.date && String(i.date).startsWith(monthStatsPrefix));
   const monthStatBucket = (t) => {
     if (t === "暖身" || t === "實體暖身") return "實體暖身";
-    if (t === "談場未到") return "談場";
     return t || "其他";
   };
   const monthTypeCounts = monthStatsItems.reduce((acc, i) => {
