@@ -128,6 +128,12 @@ async function save(key, val) {
 const RECRUIT_ROLES = ["邀約拒絕", "談後拒絕", "未加入", "暖身中", "確定談場", "談場延期", "跟進中", "已付訂金", "已加入"];
 // 非上線狀態只保留招募漏斗角色（把「夥伴」視為已加入移除重疊）
 const NON_UPLINE_ROLES = [...RECRUIT_ROLES];
+
+function partnerRoleSortIndex(role) {
+  const r = role === "夥伴" ? "已加入" : role;
+  const ix = RECRUIT_ROLES.indexOf(r);
+  return ix >= 0 ? ix : RECRUIT_ROLES.length;
+}
 const COST_TYPES = ["訂金", "買貨", "加盟", "活動", "其他"];
 const TYPE_COLOR = { 訂金: "#4a90d9", 買貨: "#b8860b", 加盟: "#c0392b", 活動: "#7c3aed", 其他: "#6b7280" };
 const RECRUIT_COLOR = { 未加入: "#aaa", 暖身中: "#4a90d9", 確定談場: "#b8860b", 談場延期: "#e67e22", 跟進中: "#8b5cf6", 已付訂金: "#f59e0b", 邀約拒絕: "#c0392b", 談後拒絕: "#e74c3c", 已加入: "#27ae60" };
@@ -1731,6 +1737,12 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       if (sortBy === "region-desc") return String(b.region||"").localeCompare(String(a.region||""), "zh-Hant");
       if (sortBy === "attribute-asc") return String(a.attribute||"").localeCompare(String(b.attribute||""), "zh-Hant");
       if (sortBy === "attribute-desc") return String(b.attribute||"").localeCompare(String(a.attribute||""), "zh-Hant");
+      if (filter === "全部" && sortBy === "default") {
+        const ra = partnerRoleSortIndex(a.role);
+        const rb = partnerRoleSortIndex(b.role);
+        if (ra !== rb) return ra - rb;
+        return String(a.name || "").localeCompare(String(b.name || ""), "zh-Hant");
+      }
       return 0;
     });
 
