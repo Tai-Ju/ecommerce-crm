@@ -443,6 +443,36 @@ function formatPartnerMultiDates(raw) {
   return list.map((d) => fmtFullDate(d)).join("、");
 }
 
+/** 行程類互動／人脈日期比對用（只取 YYYY-MM-DD） */
+function normalizeScheduleYmd(date) {
+  const m = String(date || "").trim().match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : String(date || "").trim();
+}
+
+function scheduleEventKey(partnerId, type, date) {
+  return `${partnerId}|${type}|${normalizeScheduleYmd(date)}`;
+}
+
+function isDerivedMeetingPlanLine(i) {
+  return i.fromMeetingId != null && String(i.fromMeetingId).trim() !== "";
+}
+
+/** 總覽／統計：同夥伴同日同類型只計一次，排除上線會議拆筆 */
+function countUniqueTimelineByType(items, type) {
+  const seen = new Set();
+  let n = 0;
+  for (const i of items) {
+    if (i.type !== type) continue;
+    const key = i.partnerId && i.date
+      ? scheduleEventKey(i.partnerId, type, i.date)
+      : `${type}|id|${i.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    n++;
+  }
+  return n;
+}
+
 /** 表單／CSV：多行或逗號分隔，單段交給 parsePartnerDateCell */
 function normalizePartnerScheduleFieldInput(raw) {
   const t = String(raw ?? "").trim();
@@ -1430,7 +1460,7 @@ function Dashboard({ partners, interactions, goals, setGoals, manifest, setManif
   const interactionScheduleSet = new Set(
     interactions
       .filter(i => SCHEDULE_TYPES.includes(i.type) && i.partnerId && i.date)
-      .map(i => `${i.partnerId}|${i.type}|${i.date}`)
+      .map(i => scheduleEventKey(i.partnerId, i.type, i.date))
   );
   const partnerScheduleEvents = partners
     .filter(p => p.role !== "上線")
@@ -1443,13 +1473,13 @@ function Dashboard({ partners, interactions, goals, setGoals, manifest, setManif
       parseMultiYmdList(p.dateProductCourse).forEach((d) => rows.push({ partnerId: p.id, type: "產品課程", date: d }));
       return rows;
     })
-    .filter(e => !interactionScheduleSet.has(`${e.partnerId}|${e.type}|${e.date}`));
-  const mergedTimelineForStats = [...interactions, ...partnerScheduleEvents];
+    .filter(e => !interactionScheduleSet.has(scheduleEventKey(e.partnerId, e.type, e.date)));
+  const statsTimelineItems = [...interactions, ...partnerScheduleEvents].filter(i => !isDerivedMeetingPlanLine(i));
   const timelineCounts = {
-    talk: mergedTimelineForStats.filter(i => i.type === "談場").length,
-    warmupPhysical: mergedTimelineForStats.filter(i => i.type === "實體暖身").length,
-    teamActivity: mergedTimelineForStats.filter(i => i.type === "團隊活動").length,
-    meeting: mergedTimelineForStats.filter(i => i.type === "上線會議").length,
+    talk: countUniqueTimelineByType(statsTimelineItems, "談場"),
+    warmupPhysical: countUniqueTimelineByType(statsTimelineItems, "實體暖身"),
+    teamActivity: countUniqueTimelineByType(statsTimelineItems, "團隊活動"),
+    meeting: countUniqueTimelineByType(statsTimelineItems, "上線會議"),
   };
 
   const totalIncome = incomes.reduce((s,i)=>s+i.amount,0);
@@ -2732,7 +2762,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
   const interactionScheduleSet = new Set(
     interactions
       .filter(i => SCHEDULE_TYPES.includes(i.type) && i.partnerId && i.date)
-      .map(i => `${i.partnerId}|${i.type}|${i.date}`)
+      .map(i => scheduleEventKey(i.partnerId, i.type, i.date))
   );
   const partnerScheduleItems = partners
     .filter(p => p.role !== "上線")
@@ -2805,7 +2835,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
       });
       return items;
     })
-    .filter(it => !interactionScheduleSet.has(`${it.partnerId}|${it.type}|${it.date}`));
+    .filter(it => !interactionScheduleSet.has(scheduleEventKey(it.partnerId, it.type, it.date)));
   /** 月曆：上線會議主紀錄留在開會當日；拆筆僅在它們含「M/D」等明確日期時才出現在對應日期，未寫日期的子筆不堆在開會當日（仍保留在人脈互動／資料） */
   const calendarInteractionRows = interactions.filter((i) => {
     const fid = i.fromMeetingId != null && String(i.fromMeetingId).trim() !== "";
@@ -2821,8 +2851,6 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
     return i.type === filter;
   };
   const filteredItems = calendarItems.filter(matchesCalFilter);
-  /** 由上線會議拆出的子筆：列表檢視不重複列出 */
-  const isDerivedMeetingPlanLine = (i) => i.fromMeetingId != null && String(i.fromMeetingId).trim() !== "";
   const timelineListItems = filteredItems.filter(i => !isDerivedMeetingPlanLine(i));
   const monthPrefix = `${calMonth.y}-${String(calMonth.m+1).padStart(2,"0")}`;
   const monthListRows = [...timelineListItems].filter(i => i.date.startsWith(monthPrefix)).sort(sortByNearToday);
