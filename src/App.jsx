@@ -924,9 +924,20 @@ const css = `
   .progress-bar{height:4px;background:var(--bg3);border-radius:2px;margin-top:8px;overflow:hidden}
   .progress-fill{height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-border));border-radius:2px;transition:width .6s ease}
 
-  /* ── Partner cards ── */
-  .partner-card{background:#fff;border:1.5px solid var(--border);border-radius:var(--radius);padding:16px;transition:all .18s;cursor:pointer}
-  .partner-card:hover{border-color:var(--gold-border);box-shadow:0 4px 16px rgba(184,134,11,.12)}
+  /* ── Partner table ── */
+  .partner-table-wrap{background:#fff;border:1.5px solid var(--border);border-radius:var(--radius);overflow:auto;box-shadow:var(--shadow)}
+  .partner-table{width:100%;border-collapse:collapse;font-size:12px}
+  .partner-table th,.partner-table td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--border);vertical-align:middle}
+  .partner-table th{font-size:10px;color:var(--text3);letter-spacing:1px;font-family:'DM Mono',monospace;background:var(--bg3);white-space:nowrap;position:sticky;top:0;z-index:1}
+  .partner-table tbody tr{cursor:pointer;transition:background .15s}
+  .partner-table tbody tr:hover{background:var(--gold-light)}
+  .partner-table tbody tr:last-child td{border-bottom:none}
+  .partner-table .cell-name{display:flex;align-items:center;gap:8px;min-width:120px}
+  .partner-table .avatar{width:32px;height:32px;font-size:13px}
+  .partner-table .cell-actions{white-space:nowrap}
+  .partner-table .cell-muted{color:var(--text3)}
+  .partner-table .cell-cost{color:var(--red);font-family:'DM Mono',monospace;font-size:11px}
+  .partner-table-empty{text-align:center;color:var(--text3);padding:40px 16px;font-size:13px}
   .avatar{width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,var(--gold-light),#fff);display:flex;align-items:center;justify-content:center;font-family:'Playfair Display',serif;font-size:17px;color:var(--gold);border:2px solid var(--gold-border);flex-shrink:0}
   .avatar-lg{width:62px;height:62px;font-size:23px}
   .role-badge{display:inline-block;padding:2px 7px;border-radius:5px;font-size:10px;font-family:'DM Mono',monospace;letter-spacing:.5px}
@@ -2083,36 +2094,66 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
           </select>
         </div>
       </div>
-      <div className="grid-3">
-        {filtered.map(p=>(
-          <div key={p.id} className="partner-card" onClick={()=>{setSelected(p);setDetailTab("info");}}>
-            <div className="flex items-center gap-10 mb-8">
-              <div className="avatar" style={p.photo ? {overflow:"hidden"} : undefined}>
-                {p.photo ? <img src={p.photo} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/> : (p.avatar||p.name[0])}
-              </div>
-              <div>
-                <div style={{fontWeight:700,fontSize:14}}>{p.name}</div>
-                <div style={{marginTop:4,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-                  {roleBadge(p.role)}
-                  {p.warmupStalled && <span className="tag">暖身卡關</span>}
-                </div>
-              </div>
-            </div>
-            <div className="mb-6" style={{display:"flex",flexWrap:"wrap",gap:4}}>
-              {p.gender&&<span className="tag">{p.gender}</span>}
-              {p.relation&&<span className="tag">{p.relation}</span>}
-              {p.region&&<span className="tag">{p.region}</span>}
-              {p.occupation&&<span className="tag">{p.occupation}</span>}
-            </div>
-            <div className="text-xs text-muted mono mb-4">年齡 {p.age||"—"} · 薪資 {p.salary != null && String(p.salary).trim() !== "" ? String(p.salary) : "—"}</div>
-            {(p.costs||[]).length>0&&<div className="mono mt-4" style={{fontSize:11,color:"var(--red)"}}>投入 NT${(p.costs||[]).reduce((a,c)=>a+c.amount,0).toLocaleString()}</div>}
-            {p.abcNote&&p.abcNote!==ABC_TEMPLATE&&<div className="tag tag-gold" style={{marginTop:6,display:"inline-block"}}>📋 已有ABC單</div>}
-            <div className="flex gap-6 mt-10" onClick={e=>e.stopPropagation()}>
-              <button className="btn btn-ghost btn-sm" onClick={()=>openEdit(p)}>✏️ 編輯</button>
-              <button className="btn btn-danger btn-sm" onClick={()=>del(p.id)}>刪除</button>
-            </div>
-          </div>
-        ))}
+      <div className="partner-table-wrap">
+        {filtered.length === 0 ? (
+          <div className="partner-table-empty">沒有符合條件的人脈</div>
+        ) : (
+          <table className="partner-table">
+            <thead>
+              <tr>
+                <th>姓名</th>
+                <th>狀態</th>
+                <th>性別</th>
+                <th>關係</th>
+                <th>地區</th>
+                <th>職業</th>
+                <th>年齡</th>
+                <th>薪資</th>
+                <th>投入</th>
+                <th>ABC</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(p => {
+                const costTotal = (p.costs || []).reduce((a, c) => a + c.amount, 0);
+                const hasAbc = p.abcNote && p.abcNote !== ABC_TEMPLATE;
+                return (
+                  <tr key={p.id} onClick={() => { setSelected(p); setDetailTab("info"); }}>
+                    <td>
+                      <div className="cell-name">
+                        <div className="avatar" style={p.photo ? { overflow: "hidden" } : undefined}>
+                          {p.photo ? <img src={p.photo} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /> : (p.avatar || p.name?.[0] || "?")}
+                        </div>
+                        <span style={{ fontWeight: 700 }}>{p.name || "—"}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                        {roleBadge(p.role)}
+                        {p.warmupStalled && <span className="tag">暖身卡關</span>}
+                      </div>
+                    </td>
+                    <td className="cell-muted">{p.gender || "—"}</td>
+                    <td className="cell-muted">{p.relation || "—"}</td>
+                    <td className="cell-muted">{p.region || "—"}</td>
+                    <td className="cell-muted">{p.occupation || "—"}</td>
+                    <td className="cell-muted mono">{p.age || "—"}</td>
+                    <td className="cell-muted mono">{p.salary != null && String(p.salary).trim() !== "" ? String(p.salary) : "—"}</td>
+                    <td className="cell-cost">{costTotal > 0 ? `NT$${costTotal.toLocaleString()}` : "—"}</td>
+                    <td>{hasAbc ? <span className="tag tag-gold">有</span> : <span className="cell-muted">—</span>}</td>
+                    <td className="cell-actions" onClick={e => e.stopPropagation()}>
+                      <div className="flex gap-6">
+                        <button className="btn btn-ghost btn-sm" onClick={() => openEdit(p)}>編輯</button>
+                        <button className="btn btn-danger btn-sm" onClick={() => del(p.id)}>刪除</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {/* Detail modal */}
