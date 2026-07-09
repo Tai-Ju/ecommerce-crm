@@ -9,6 +9,7 @@ const ALLOWED = new Set([
   "crm3:partners",
   "crm3:partnersTrash",
   "crm3:interactions",
+  "crm3:interactionsTrash",
   "crm3:todos",
   "crm3:quotes",
   "crm3:goals",

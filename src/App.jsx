@@ -5,6 +5,7 @@ const KEYS = {
   partners: "crm3:partners",
   partnersTrash: "crm3:partnersTrash",
   interactions: "crm3:interactions",
+  interactionsTrash: "crm3:interactionsTrash",
   todos: "crm3:todos",
   quotes: "crm3:quotes",
   goals: "crm3:goals",
@@ -630,6 +631,69 @@ function removeInteractionsSyncedFromMeeting(interactions, meetingId) {
   if (meetingId == null || String(meetingId).trim() === "") return interactions;
   const mid = String(meetingId);
   return interactions.filter(i => String(i.fromMeetingId ?? "") !== mid);
+}
+
+/** 計算刪除一筆互動時要移出列表的完整 bundle（含上線會議拆筆） */
+function computeInteractionRemoval(interactions, targetId, { legacyPartnerId, legacyScope = "partner" } = {}) {
+  const target = interactions.find((i) => i.id === targetId);
+  if (!target) return { target: null, removed: [], next: interactions };
+
+  const removedIds = new Set([targetId]);
+  if (target.type === "上線會議") {
+    const mid = String(targetId);
+    const prefix = `來自上線會議「${target.title}」的行動項目`;
+    for (const i of interactions) {
+      if (String(i.fromMeetingId ?? "") === mid) removedIds.add(i.id);
+      if (
+        i.type === "規劃" &&
+        i.content === prefix &&
+        (legacyScope === "all" ||
+          String(i.fromMeetingId ?? "") === mid ||
+          (!i.fromMeetingId && legacyPartnerId && i.partnerId === legacyPartnerId))
+      ) {
+        removedIds.add(i.id);
+      }
+    }
+  }
+
+  const removed = interactions.filter((i) => removedIds.has(i.id));
+  const next = interactions.filter((i) => !removedIds.has(i.id));
+  return { target, removed, next };
+}
+
+function pushInteractionTrashBundle(trashBundles, removed, mainId) {
+  if (!removed.length) return trashBundles;
+  const bundle = {
+    id: uid(),
+    mainId,
+    deletedAt: new Date().toISOString(),
+    items: removed.map((i) => ({ ...i })),
+  };
+  return [bundle, ...trashBundles].slice(0, 300);
+}
+
+function applyScheduleFieldRemovalsForInteractions(removed, setPartners) {
+  for (const item of removed) {
+    if (SCHEDULE_TYPES.includes(item.type) && item.partnerId && item.date) {
+      removeDateFromPartnerField(item.partnerId, item.type, item.date, setPartners);
+    }
+  }
+}
+
+function restoreInteractionTrashBundle(bundle, interactions, setInteractions, setPartners) {
+  const existingIds = new Set(interactions.map((i) => i.id));
+  const restored = bundle.items.map((item) => {
+    const copy = { ...item };
+    if (existingIds.has(copy.id)) copy.id = uid();
+    existingIds.add(copy.id);
+    return copy;
+  });
+  setInteractions([...interactions, ...restored]);
+  for (const item of restored) {
+    if (SCHEDULE_TYPES.includes(item.type) && item.partnerId && item.date) {
+      syncPartnerFieldFromInteraction(item, setPartners);
+    }
+  }
 }
 
 /** 舊資料可能 split 在 partnerPlan / actionItems；編輯時合併為單一欄位顯示 */
@@ -2032,19 +2096,18 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
   const deleteInteraction = (id) => {
     if (!selected) return;
     const target = interactions.find((i) => i.id === id);
-    setInteractions((prev) => {
-      let next = prev.filter((i) => i.id !== id);
-      if (target?.type === "上線會議") {
-        next = removeInteractionsSyncedFromMeeting(next, id);
-        const prefix = `來自上線會議「${target.title}」的行動項目`;
-        const idStr = String(id);
-        next = next.filter(i => !(i.type === "規劃" && i.content === prefix && (String(i.fromMeetingId ?? "") === idStr || (!i.fromMeetingId && i.partnerId === selected.id))));
-      }
-      return next;
-    });
-    if (target && SCHEDULE_TYPES.includes(target.type) && target.partnerId && target.date) {
-      removeDateFromPartnerField(target.partnerId, target.type, target.date, setPartners);
-    }
+    if (!target) return;
+    if (!window.confirm(`確定要刪除「${target.title || target.type}」嗎？`)) return;
+    if (!window.confirm("最後確認：刪除後會先移到回收桶，可還原。是否繼續？")) return;
+    const { removed, next } = computeInteractionRemoval(interactions, id, { legacyPartnerId: selected.id });
+    (async () => {
+      const rows = (await load(KEYS.interactionsTrash)) || [];
+      const trashBundles = Array.isArray(rows) ? rows : [];
+      const nextTrash = pushInteractionTrashBundle(trashBundles, removed, id);
+      save(KEYS.interactionsTrash, nextTrash);
+    })();
+    setInteractions(next);
+    applyScheduleFieldRemovalsForInteractions(removed, setPartners);
     setShowInteractionForm(false);
   };
 
@@ -2643,6 +2706,18 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
   const [calMonth, setCalMonth] = useState(()=>{ const n=new Date(); return {y:n.getFullYear(),m:n.getMonth()}; });
   const [calDayListModal, setCalDayListModal] = useState(null); // { ymd, items }
   const [timelineView, setTimelineView] = useState("calendar"); // calendar | list
+  const [trashBundles, setTrashBundles] = useState([]);
+  const [showTrash, setShowTrash] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const rows = (await load(KEYS.interactionsTrash)) || [];
+      if (!mounted) return;
+      setTrashBundles(Array.isArray(rows) ? rows : []);
+    })();
+    return () => { mounted = false; };
+  }, []);
 
   const sortByNearToday = (a, b) => {
     const todayMs = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00").getTime();
@@ -2827,20 +2902,38 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
     closeTimelineForm();
   };
   const del = (id) => {
-    const target = interactions.find((i) => i.id === id);
-    setInteractions((prev) => {
-      let next = prev.filter((i) => i.id !== id);
-      if (target?.type === "上線會議") {
-        next = removeInteractionsSyncedFromMeeting(next, id);
-        const prefix = `來自上線會議「${target.title}」的行動項目`;
-        next = next.filter(i => !(i.type === "規劃" && i.content === prefix));
-      }
-      return next;
-    });
-    if (target && SCHEDULE_TYPES.includes(target.type) && target.partnerId && target.date) {
-      removeDateFromPartnerField(target.partnerId, target.type, target.date, setPartners);
-    }
+    const { target, removed, next } = computeInteractionRemoval(interactions, id, { legacyScope: "all" });
+    if (!target) return;
+    if (!window.confirm(`確定要刪除「${target.title || target.type}」嗎？`)) return;
+    if (!window.confirm("最後確認：刪除後會先移到回收桶，可還原。是否繼續？")) return;
+    const nextTrash = pushInteractionTrashBundle(trashBundles, removed, id);
+    setTrashBundles(nextTrash);
+    save(KEYS.interactionsTrash, nextTrash);
+    setInteractions(next);
+    applyScheduleFieldRemovalsForInteractions(removed, setPartners);
     setSelected(null);
+  };
+  const restoreFromTrash = (bundleId) => {
+    const bundle = trashBundles.find((b) => b.id === bundleId);
+    if (!bundle) return;
+    restoreInteractionTrashBundle(bundle, interactions, setInteractions, setPartners);
+    const nextTrash = trashBundles.filter((b) => b.id !== bundleId);
+    setTrashBundles(nextTrash);
+    save(KEYS.interactionsTrash, nextTrash);
+    setShowTrash(false);
+  };
+  const removeTrashBundle = (bundleId) => {
+    if (!window.confirm("永久刪除後無法復原，確定嗎？")) return;
+    const nextTrash = trashBundles.filter((b) => b.id !== bundleId);
+    setTrashBundles(nextTrash);
+    save(KEYS.interactionsTrash, nextTrash);
+  };
+  const trashBundleSummary = (bundle) => {
+    const main = bundle.items.find((i) => i.id === bundle.mainId) || bundle.items[0];
+    if (!main) return "已刪除紀錄";
+    const p = main.partnerId ? getP(main.partnerId) : null;
+    const extra = bundle.items.length > 1 ? ` 等 ${bundle.items.length} 筆` : "";
+    return `${main.title || main.type}${p ? ` · ${p.name}` : ""}${extra}`;
   };
   const toggle = (id) => setInteractions((prev) => prev.map(i=>i.id===id?{...i,status:i.status==="已完成"?"待執行":"已完成"}:i));
   const openScheduleEdit = (it) => {
@@ -2950,9 +3043,44 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
           </div>
         </div>
         <div className="flex gap-8" style={{ flexShrink: 0 }}>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowTrash(true)}>
+            🗑 回收桶 {trashBundles.length > 0 ? `(${trashBundles.length})` : ""}
+          </button>
           <button className="btn btn-gold btn-sm" onClick={openNew}>＋ 新增</button>
         </div>
       </div>
+
+      {showTrash && (
+        <Modal title="時間軸回收桶" onClose={() => setShowTrash(false)} wide>
+          {trashBundles.length === 0 && <div className="empty">目前沒有可還原的紀錄</div>}
+          {trashBundles.length > 0 && (
+            <div className="card" style={{ padding: 0 }}>
+              {trashBundles.map((bundle) => {
+                const main = bundle.items.find((i) => i.id === bundle.mainId) || bundle.items[0];
+                return (
+                  <div key={bundle.id} className="timeline-item">
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="flex items-center gap-6" style={{ flexWrap: "wrap" }}>
+                        <span style={{ fontWeight: 600, fontSize: 14 }}>{trashBundleSummary(bundle)}</span>
+                        {main && <span className="tag">{main.type}</span>}
+                        {main?.status && <span className={`status-badge status-${main.status}`}>{main.status}</span>}
+                      </div>
+                      <div className="text-xs mono mt-4" style={{ color: "var(--text3)" }}>
+                        {main ? `${main.date} ${normalizeTime(main.time)}` : ""}
+                        {bundle.deletedAt ? ` · 刪除於 ${new Date(bundle.deletedAt).toLocaleString("zh-TW")}` : ""}
+                      </div>
+                    </div>
+                    <div className="flex gap-8" style={{ flexShrink: 0 }}>
+                      <button type="button" className="btn btn-gold btn-sm" onClick={() => restoreFromTrash(bundle.id)}>還原</button>
+                      <button type="button" className="btn btn-danger btn-sm" onClick={() => removeTrashBundle(bundle.id)}>永久刪除</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Modal>
+      )}
 
       {/* 分類篩選 + 月曆／列表切換 */}
       <div>
