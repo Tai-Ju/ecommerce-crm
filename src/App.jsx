@@ -1156,6 +1156,7 @@ export default function App() {
         dateProductCourse: p.dateProductCourse || "",
         dateTalkVenueNoShow: p.dateTalkVenueNoShow || "",
         warmupStalled: Boolean(p.warmupStalled),
+        sensitiveRelation: Boolean(p.sensitiveRelation),
       }));
       setPartners(migratedPartners);
       if (loadedPartners.some(p => p.role === "夥伴" || p.role === "拒絕")) save(KEYS.partners, migratedPartners);
@@ -1709,9 +1710,9 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       return true;
     })
     .sort((a, b) => {
-      const aStalled = Boolean(a.warmupStalled);
-      const bStalled = Boolean(b.warmupStalled);
-      if (aStalled !== bStalled) return aStalled ? 1 : -1; // 暖身卡關者固定置底
+      const aBottom = Boolean(a.warmupStalled) || Boolean(a.sensitiveRelation);
+      const bBottom = Boolean(b.warmupStalled) || Boolean(b.sensitiveRelation);
+      if (aBottom !== bBottom) return aBottom ? 1 : -1; // 暖身卡關／敏感關係固定置底
       const joinedKey = (p) => String(p?.joined || "").trim();
       const cmpJoined = (desc) => {
         const ja = joinedKey(a);
@@ -1803,6 +1804,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     dateWarmupPhysical: normalizePartnerScheduleFieldInput(d.dateWarmupPhysical),
     dateProductCourse: normalizePartnerScheduleFieldInput(d.dateProductCourse),
     warmupStalled: Boolean(d.warmupStalled),
+    sensitiveRelation: Boolean(d.sensitiveRelation),
   });
 
   const patchPartnerForm = (partial) => {
@@ -1829,7 +1831,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
   };
 
   const openNew = () => {
-    const blank = { id: uid(), name: "", role: "暖身中", avatar: "", photo: "", attribute: "", personality: "", painPoint: "", region: "", vacation: "", memo: "", gender: "", relation: "", age: "", occupation: "", salary: "", dateTalkVenue: "", dateTalkVenueNoShow: "", dateTeamActivity: "", dateWarmupPhysical: "", dateProductCourse: "", warmupStalled: false, costs: [], abcNote: ABC_TEMPLATE, joined: new Date().toISOString().slice(0, 10) };
+    const blank = { id: uid(), name: "", role: "暖身中", avatar: "", photo: "", attribute: "", personality: "", painPoint: "", region: "", vacation: "", memo: "", gender: "", relation: "", age: "", occupation: "", salary: "", dateTalkVenue: "", dateTalkVenueNoShow: "", dateTeamActivity: "", dateWarmupPhysical: "", dateProductCourse: "", warmupStalled: false, sensitiveRelation: false, costs: [], abcNote: ABC_TEMPLATE, joined: new Date().toISOString().slice(0, 10) };
     setPartners((p) => [...p, blank]);
     setEditData(blank);
     setPartnerFormIsNew(true);
@@ -1858,6 +1860,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       dateWarmupPhysical: p.dateWarmupPhysical || "",
       dateProductCourse: p.dateProductCourse || "",
       warmupStalled: Boolean(p.warmupStalled),
+      sensitiveRelation: Boolean(p.sensitiveRelation),
       abcNote: p.abcNote || "",
     });
     setShowForm(true);
@@ -2131,6 +2134,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                         {roleBadge(p.role)}
                         {p.warmupStalled && <span className="tag">暖身卡關</span>}
+                        {p.sensitiveRelation && <span className="tag" style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#b91c1c" }}>敏感關係</span>}
                       </div>
                     </td>
                     <td className="cell-muted">{p.attribute || "—"}</td>
@@ -2190,6 +2194,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
                   ["薪資", selected.salary != null && String(selected.salary).trim() !== "" ? String(selected.salary) : ""],
                   ["加入名單", selected.joined ? fmtFullDate(selected.joined) : ""],
                   ["暖身卡關註記", selected.warmupStalled ? "是" : ""],
+                  ["敏感關係註記", selected.sensitiveRelation ? "是" : ""],
                   ["談場", formatPartnerMultiDates(selected.dateTalkVenue)],
                   ["談場未到", formatPartnerMultiDates(selected.dateTalkVenueNoShow)],
                   ["團隊活動", formatPartnerMultiDates(selected.dateTeamActivity)],
@@ -2416,6 +2421,13 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             <label className="label">暖身卡關註記（已聊天但尚未約出實體見面）</label>
             <label className="text-sm" style={{display:"flex",alignItems:"center",gap:8}}>
               <input type="checkbox" checked={Boolean(editData.warmupStalled)} onChange={e=>patchPartnerForm({ warmupStalled: e.target.checked })}/>
+              排序置底
+            </label>
+          </div>
+          <div className="form-group">
+            <label className="label">敏感關係註記（同辦公室、關係戶等，現階段不宜推進）</label>
+            <label className="text-sm" style={{display:"flex",alignItems:"center",gap:8}}>
+              <input type="checkbox" checked={Boolean(editData.sensitiveRelation)} onChange={e=>patchPartnerForm({ sensitiveRelation: e.target.checked })}/>
               排序置底
             </label>
           </div>
