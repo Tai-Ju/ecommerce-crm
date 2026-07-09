@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
-// ─── Storage：MongoDB 後端（設 VITE_CRM_API_URL + VITE_CRM_API_TOKEN）或本機 window.storage ──
+// ─── Storage：MongoDB 後端（設 VITE_CRM_API_URL + 登入 JWT）或本機 window.storage ──
 const KEYS = {
   partners: "crm3:partners",
   partnersTrash: "crm3:partnersTrash",
@@ -14,20 +14,84 @@ const KEYS = {
   selfCosts: "crm3:selfCosts",
 };
 
-function getCrmApi() {
-  const base = import.meta.env.VITE_CRM_API_URL?.replace(/\/$/, "");
-  const token = import.meta.env.VITE_CRM_API_TOKEN;
-  if (base && token) return { base, token };
+const SESSION_KEY = "crm_session_token";
+
+function getApiBase() {
+  const env = import.meta.env.VITE_CRM_API_URL?.replace(/\/$/, "");
+  if (env) return env;
+  if (import.meta.env.DEV) return "";
   return null;
+}
+
+function usesBackend() {
+  return getApiBase() !== null;
+}
+
+function getSessionToken() {
+  try {
+    return sessionStorage.getItem(SESSION_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function setSessionToken(token) {
+  try {
+    if (token) sessionStorage.setItem(SESSION_KEY, token);
+    else sessionStorage.removeItem(SESSION_KEY);
+  } catch { /* ignore */ }
+}
+
+function onUnauthorized() {
+  setSessionToken("");
+  window.dispatchEvent(new Event("crm-unauthorized"));
+}
+
+async function apiFetch(path, options = {}) {
+  const base = getApiBase();
+  const token = getSessionToken();
+  const headers = { ...(options.headers || {}) };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`${base}${path}`, { ...options, headers });
+  if (res.status === 401) onUnauthorized();
+  return res;
+}
+
+async function login(username, password) {
+  const res = await fetch(`${getApiBase()}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "登入失敗");
+  setSessionToken(data.token);
+  return data.token;
+}
+
+async function verifySession() {
+  if (!getSessionToken()) return false;
+  try {
+    const res = await apiFetch("/api/auth/me");
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function getCrmApi() {
+  const base = getApiBase();
+  if (base === null) return null;
+  const token = getSessionToken();
+  if (!token) return null;
+  return { base, token };
 }
 
 async function load(key) {
   const api = getCrmApi();
   if (api) {
     try {
-      const res = await fetch(`${api.base}/api/kv/${encodeURIComponent(key)}`, {
-        headers: { Authorization: `Bearer ${api.token}` },
-      });
+      const res = await apiFetch(`/api/kv/${encodeURIComponent(key)}`);
       if (res.status === 404) return null;
       if (!res.ok) return null;
       return await res.json();
@@ -47,12 +111,9 @@ async function save(key, val) {
   const api = getCrmApi();
   if (api) {
     try {
-      await fetch(`${api.base}/api/kv/${encodeURIComponent(key)}`, {
+      await apiFetch(`/api/kv/${encodeURIComponent(key)}`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${api.token}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(val),
       });
     } catch { /* ignore (non-blocking save) */ }
@@ -960,13 +1021,67 @@ const css = `
   .mono{font-family:'DM Mono',monospace}
   .divider{height:1px;background:var(--border);margin:14px 0}
   .empty{text-align:center;color:var(--text3);padding:32px 0;font-size:13px}
+
+  /* ── Login ── */
+  .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:24px}
+  .login-card{background:#fff;border:1.5px solid var(--border);border-radius:16px;padding:32px 28px;width:100%;max-width:380px;box-shadow:var(--shadow)}
+  .login-logo{justify-content:center;margin-bottom:8px}
+  .login-sub{text-align:center;font-size:13px;color:var(--text3);margin-bottom:20px}
+  .login-error{color:#c0392b;font-size:12px;margin-bottom:12px;text-align:center}
+  .login-btn{width:100%;margin-top:4px}
 `;
 
 // ─── Theme constants ──────────────────────────────────────────────
 const var_gold = "#b8860b";
 
+function LoginPage({ onSuccess }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const token = await login(username, password);
+      onSuccess(token);
+    } catch (err) {
+      setError(err.message || "登入失敗");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <>
+      <style>{css}</style>
+      <div className="login-wrap">
+        <div className="login-card">
+          <div className="logo login-logo"><div className="logo-dot"/>Network CRM</div>
+          <p className="login-sub">請登入以存取你的 CRM 資料</p>
+          <form onSubmit={submit}>
+            <div className="form-group">
+              <label className="label">帳號</label>
+              <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
+            </div>
+            <div className="form-group">
+              <label className="label">密碼</label>
+              <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
+            </div>
+            {error && <div className="login-error">{error}</div>}
+            <button className="btn btn-gold login-btn" type="submit" disabled={loading}>{loading ? "登入中…" : "登入"}</button>
+          </form>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── App ──────────────────────────────────────────────────────────
 export default function App() {
+  const [authToken, setAuthToken] = useState(() => (usesBackend() ? getSessionToken() : "local"));
+  const [authReady, setAuthReady] = useState(!usesBackend());
   const [tab, setTab] = useState("dashboard");
   const [partners, setPartners] = useState([]);
   const [interactions, setInteractions] = useState([]);
@@ -980,6 +1095,33 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
+    if (!usesBackend()) return;
+    let cancelled = false;
+    (async () => {
+      if (!authToken) {
+        if (!cancelled) setAuthReady(true);
+        return;
+      }
+      const ok = await verifySession();
+      if (!ok && !cancelled) setAuthToken("");
+      if (!cancelled) setAuthReady(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    const handler = () => {
+      setAuthToken("");
+      setLoaded(false);
+    };
+    window.addEventListener("crm-unauthorized", handler);
+    return () => window.removeEventListener("crm-unauthorized", handler);
+  }, []);
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (usesBackend() && !authToken) return;
+    let cancelled = false;
     (async () => {
       const loadedPartners = (await load(KEYS.partners)) || SEED_PARTNERS;
       // 兼容舊資料欄位：角色「夥伴」轉已加入、舊「拒絕」轉邀約拒絕，並補齊新版人脈欄位
@@ -1029,9 +1171,10 @@ export default function App() {
       setManifest((await load(KEYS.manifest)) || SEED_MANIFEST);
       setIncomes((await load(KEYS.incomes)) || []);
       setSelfCosts((await load(KEYS.selfCosts)) || []);
-      setLoaded(true);
+      if (!cancelled) setLoaded(true);
     })();
-  }, []);
+    return () => { cancelled = true; };
+  }, [authReady, authToken]);
 
   const persist = useCallback((key, val, setter) => {
     if (typeof val === "function") {
@@ -1045,6 +1188,18 @@ export default function App() {
     setter(val);
     save(key, val);
   }, []);
+
+  const handleLogout = () => {
+    setSessionToken("");
+    setAuthToken("");
+    setLoaded(false);
+  };
+
+  if (!authReady) return <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100vh", color:var_gold, fontFamily:"'Playfair Display',serif", fontSize:20 }}><style>{css}</style>驗證中…</div>;
+
+  if (usesBackend() && !authToken) {
+    return <LoginPage onSuccess={(token) => { setAuthToken(token); setLoaded(false); }} />;
+  }
 
   if (!loaded) return <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100vh", color:var_gold, fontFamily:"'Playfair Display',serif", fontSize:20 }}><style>{css}</style>載入中…</div>;
 
@@ -1065,6 +1220,7 @@ export default function App() {
           <div className="logo"><div className="logo-dot"/>Network CRM</div>
           <nav className="nav">
             {TABS.map(t => <button key={t.id} className={`nav-btn${tab===t.id?" active":""}`} onClick={() => setTab(t.id)}>{t.label}</button>)}
+            {usesBackend() && <button className="btn btn-ghost btn-sm" onClick={handleLogout}>登出</button>}
           </nav>
         </header>
         <main className="main">
