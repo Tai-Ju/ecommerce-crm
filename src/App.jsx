@@ -131,8 +131,10 @@ const NON_UPLINE_ROLES = [...RECRUIT_ROLES];
 
 function partnerRoleSortIndex(role) {
   const r = role === "夥伴" ? "已加入" : role;
-  const ix = RECRUIT_ROLES.indexOf(r);
-  return ix >= 0 ? ix : RECRUIT_ROLES.length;
+  // 預設排序：1 已加入 → 9 邀約拒絕（由上到下）
+  const order = [...RECRUIT_ROLES].reverse();
+  const ix = order.indexOf(r);
+  return ix >= 0 ? ix : order.length;
 }
 const COST_TYPES = ["訂金", "買貨", "加盟", "活動", "其他"];
 const TYPE_COLOR = { 訂金: "#4a90d9", 買貨: "#b8860b", 加盟: "#c0392b", 活動: "#7c3aed", 其他: "#6b7280" };
