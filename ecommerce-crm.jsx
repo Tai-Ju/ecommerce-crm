@@ -587,11 +587,26 @@ function Partners({ partners, setPartners, interactions, rawSave }) {
   const [showForm, setShowForm] = useState(false);
   const [editData, setEditData] = useState(null);
   const [filter, setFilter] = useState("全部");
+  const [sortBy, setSortBy] = useState("default");
   const [copied, setCopied] = useState(false);
 
   const nonUplines = partners.filter(p=>p.role!=="上線");
   const filterGroups = ["全部","夥伴",...RECRUIT_ROLES];
-  const filtered = filter==="全部" ? nonUplines : nonUplines.filter(p=>p.role===filter);
+  const filtered = (filter==="全部" ? nonUplines : nonUplines.filter(p=>p.role===filter)).slice().sort((a, b) => {
+    const joinedKey = (p) => String(p?.joined || "").trim();
+    const cmpJoined = (desc) => {
+      const ja = joinedKey(a);
+      const jb = joinedKey(b);
+      if (!ja && !jb) return 0;
+      if (!ja) return 1;
+      if (!jb) return -1;
+      const c = ja.localeCompare(jb);
+      return desc ? -c : c;
+    };
+    if (sortBy === "joined-desc") return cmpJoined(true);
+    if (sortBy === "joined-asc") return cmpJoined(false);
+    return 0;
+  });
 
   const openNew = () => { setEditData({id:uid(),name:"",role:"暖身中",avatar:"",phone:"",ig:"",birthday:"",tags:"",notes:"",costs:[],abcNote:ABC_TEMPLATE,joined:new Date().toISOString().slice(0,10)}); setShowForm(true); };
   const openEdit = (p) => { setEditData({...p,tags:Array.isArray(p.tags)?p.tags.join("、"):(p.tags||""),abcNote:p.abcNote||""}); setShowForm(true); };
@@ -625,11 +640,18 @@ function Partners({ partners, setPartners, interactions, rawSave }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-16">
-        <h2 className="heading" style={{margin:0}}>人脈網絡 <span className="text-muted mono" style={{fontSize:12}}>({nonUplines.length})</span></h2>
+        <h2 className="heading" style={{margin:0}}>人脈網絡 <span className="text-muted mono" style={{fontSize:12}}>({filtered.length})</span></h2>
         <button className="btn btn-gold btn-sm" onClick={openNew}>＋ 新增</button>
       </div>
-      <div className="flex gap-8 mb-14" style={{flexWrap:"wrap"}}>
-        {filterGroups.map(r=><button key={r} className={`btn btn-sm ${filter===r?"btn-gold":"btn-ghost"}`} onClick={()=>setFilter(r)}>{r}</button>)}
+      <div className="flex items-center justify-between mb-14" style={{flexWrap:"wrap", gap:10}}>
+        <div className="flex gap-8" style={{flexWrap:"wrap"}}>
+          {filterGroups.map(r=><button key={r} className={`btn btn-sm ${filter===r?"btn-gold":"btn-ghost"}`} onClick={()=>setFilter(r)}>{r}</button>)}
+        </div>
+        <select className="input" style={{width:"auto",minWidth:200,maxWidth:"100%"}} value={sortBy} onChange={e=>setSortBy(e.target.value)}>
+          <option value="default">排序：預設</option>
+          <option value="joined-desc">排序：加入名單（新→舊）</option>
+          <option value="joined-asc">排序：加入名單（舊→新）</option>
+        </select>
       </div>
       <div className="grid-3">
         {filtered.map(p=>(
