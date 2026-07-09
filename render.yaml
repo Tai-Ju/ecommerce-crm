@@ -1,0 +1,56 @@
+# Render Blueprint — Network CRM
+# 使用方式：Render Dashboard → New → Blueprint → 選擇此 repo
+# 首次建立時會提示填入 MONGODB_URI、AUTH_USERNAME、AUTH_PASSWORD
+#
+# 若 repo 根目錄外還有一層資料夾（例如 ecommerce-crm-preview/），
+# 請把下方兩個 rootDir 都加上前綴，例如 ecommerce-crm-preview/server
+
+services:
+  # ── 後端 API ──────────────────────────────────────────────────────
+  - type: web
+    name: ecommerce-crm-api
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    buildFilter:
+      paths:
+        - server/**
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_DB
+        value: crm
+      - key: MONGODB_URI
+        sync: false
+      - key: AUTH_USERNAME
+        sync: false
+      - key: AUTH_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+
+  # ── 前端 Static Site ──────────────────────────────────────────────
+  - type: web
+    name: ecommerce-crm
+    runtime: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    buildFilter:
+      paths:
+        - src/**
+        - public/**
+        - index.html
+        - package.json
+        - package-lock.json
+        - vite.config.js
+    envVars:
+      # 自動帶入後端公開網址（https://ecommerce-crm-api.onrender.com）
+      - key: VITE_CRM_API_URL
+        fromService:
+          name: ecommerce-crm-api
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
