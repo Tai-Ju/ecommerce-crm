@@ -1157,6 +1157,8 @@ export default function App() {
         dateTalkVenueNoShow: p.dateTalkVenueNoShow || "",
         warmupStalled: Boolean(p.warmupStalled),
         sensitiveRelation: Boolean(p.sensitiveRelation),
+        familiarity: p.familiarity === "" || p.familiarity == null ? "" : Math.min(5, Math.max(1, Number(p.familiarity))),
+        community: p.community || "",
       }));
       setPartners(migratedPartners);
       if (loadedPartners.some(p => p.role === "夥伴" || p.role === "拒絕")) save(KEYS.partners, migratedPartners);
@@ -1805,6 +1807,8 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     dateProductCourse: normalizePartnerScheduleFieldInput(d.dateProductCourse),
     warmupStalled: Boolean(d.warmupStalled),
     sensitiveRelation: Boolean(d.sensitiveRelation),
+    familiarity: d.familiarity === "" || d.familiarity == null ? "" : Math.min(5, Math.max(1, Number(d.familiarity))),
+    community: String(d.community ?? "").trim(),
   });
 
   const patchPartnerForm = (partial) => {
@@ -1831,7 +1835,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
   };
 
   const openNew = () => {
-    const blank = { id: uid(), name: "", role: "暖身中", avatar: "", photo: "", attribute: "", personality: "", painPoint: "", region: "", vacation: "", memo: "", gender: "", relation: "", age: "", occupation: "", salary: "", dateTalkVenue: "", dateTalkVenueNoShow: "", dateTeamActivity: "", dateWarmupPhysical: "", dateProductCourse: "", warmupStalled: false, sensitiveRelation: false, costs: [], abcNote: ABC_TEMPLATE, joined: new Date().toISOString().slice(0, 10) };
+    const blank = { id: uid(), name: "", role: "暖身中", avatar: "", photo: "", attribute: "", personality: "", painPoint: "", region: "", vacation: "", memo: "", gender: "", relation: "", age: "", occupation: "", salary: "", familiarity: "", community: "", dateTalkVenue: "", dateTalkVenueNoShow: "", dateTeamActivity: "", dateWarmupPhysical: "", dateProductCourse: "", warmupStalled: false, sensitiveRelation: false, costs: [], abcNote: ABC_TEMPLATE, joined: new Date().toISOString().slice(0, 10) };
     setPartners((p) => [...p, blank]);
     setEditData(blank);
     setPartnerFormIsNew(true);
@@ -1861,6 +1865,8 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       dateProductCourse: p.dateProductCourse || "",
       warmupStalled: Boolean(p.warmupStalled),
       sensitiveRelation: Boolean(p.sensitiveRelation),
+      familiarity: p.familiarity === "" || p.familiarity == null ? "" : Math.min(5, Math.max(1, Number(p.familiarity))),
+      community: p.community || "",
       abcNote: p.abcNote || "",
     });
     setShowForm(true);
@@ -2166,7 +2172,12 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             </div>
             <div>
               <h3 style={{fontFamily:"'Playfair Display',serif",fontSize:20,color:var_gold}}>{selected.name}</h3>
-              <div style={{marginTop:6}}>{roleBadge(selected.role)}</div>
+              <div style={{marginTop:6,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                {selected.familiarity ? <span className="tag tag-gold mono">熟悉度 {selected.familiarity} 分</span> : null}
+                {roleBadge(selected.role)}
+                {selected.warmupStalled && <span className="tag">暖身卡關</span>}
+                {selected.sensitiveRelation && <span className="tag" style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#b91c1c" }}>敏感關係</span>}
+              </div>
             </div>
           </div>
 
@@ -2408,6 +2419,15 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
                 {NON_UPLINE_ROLES.map(r=><option key={r}>{r}</option>)}
               </select>
             </div>
+          </div>
+          <div className="form-row">
+            <div className="form-group"><label className="label">熟悉度</label>
+              <select className="input" value={editData.familiarity === "" || editData.familiarity == null ? "" : String(editData.familiarity)} onChange={e=>patchPartnerForm({ familiarity: e.target.value ? Number(e.target.value) : "" })}>
+                <option value="">請選擇</option>
+                {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n} 分</option>)}
+              </select>
+            </div>
+            <div className="form-group"><label className="label">社群</label><input className="input" value={editData.community || ""} onChange={e=>patchPartnerForm({ community: e.target.value })} placeholder="例：IG、Line 群、社團名稱"/></div>
           </div>
           <div className="form-row">
             <div className="form-group"><label className="label">屬性</label><input className="input" value={editData.attribute} onChange={e=>patchPartnerForm({ attribute: e.target.value })}/></div>
