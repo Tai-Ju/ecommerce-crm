@@ -1140,6 +1140,7 @@ export default function App() {
         ...p,
         role: p.role === "夥伴" ? "已加入" : (p.role === "拒絕" ? "邀約拒絕" : p.role),
         attribute: p.attribute || "",
+        personality: p.personality || "",
         painPoint: p.painPoint || "",
         region: p.region || "",
         vacation: p.vacation || "",
@@ -1828,7 +1829,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
   };
 
   const openNew = () => {
-    const blank = { id: uid(), name: "", role: "暖身中", avatar: "", photo: "", attribute: "", painPoint: "", region: "", vacation: "", memo: "", gender: "", relation: "", age: "", occupation: "", salary: "", dateTalkVenue: "", dateTalkVenueNoShow: "", dateTeamActivity: "", dateWarmupPhysical: "", dateProductCourse: "", warmupStalled: false, costs: [], abcNote: ABC_TEMPLATE, joined: new Date().toISOString().slice(0, 10) };
+    const blank = { id: uid(), name: "", role: "暖身中", avatar: "", photo: "", attribute: "", personality: "", painPoint: "", region: "", vacation: "", memo: "", gender: "", relation: "", age: "", occupation: "", salary: "", dateTalkVenue: "", dateTalkVenueNoShow: "", dateTeamActivity: "", dateWarmupPhysical: "", dateProductCourse: "", warmupStalled: false, costs: [], abcNote: ABC_TEMPLATE, joined: new Date().toISOString().slice(0, 10) };
     setPartners((p) => [...p, blank]);
     setEditData(blank);
     setPartnerFormIsNew(true);
@@ -1841,6 +1842,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       ...p,
       role: nextRole,
       attribute: p.attribute || "",
+      personality: p.personality || "",
       painPoint: p.painPoint || "",
       region: p.region || "",
       vacation: p.vacation || "",
@@ -2103,20 +2105,17 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
               <tr>
                 <th>姓名</th>
                 <th>狀態</th>
+                <th>屬性</th>
+                <th>性格</th>
                 <th>性別</th>
                 <th>關係</th>
                 <th>地區</th>
-                <th>職業</th>
-                <th>年齡</th>
-                <th>薪資</th>
-                <th>投入</th>
                 <th>ABC</th>
                 <th>操作</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map(p => {
-                const costTotal = (p.costs || []).reduce((a, c) => a + c.amount, 0);
                 const hasAbc = p.abcNote && p.abcNote !== ABC_TEMPLATE;
                 return (
                   <tr key={p.id} onClick={() => { setSelected(p); setDetailTab("info"); }}>
@@ -2134,13 +2133,11 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
                         {p.warmupStalled && <span className="tag">暖身卡關</span>}
                       </div>
                     </td>
+                    <td className="cell-muted">{p.attribute || "—"}</td>
+                    <td className="cell-muted">{p.personality || "—"}</td>
                     <td className="cell-muted">{p.gender || "—"}</td>
                     <td className="cell-muted">{p.relation || "—"}</td>
                     <td className="cell-muted">{p.region || "—"}</td>
-                    <td className="cell-muted">{p.occupation || "—"}</td>
-                    <td className="cell-muted mono">{p.age || "—"}</td>
-                    <td className="cell-muted mono">{p.salary != null && String(p.salary).trim() !== "" ? String(p.salary) : "—"}</td>
-                    <td className="cell-cost">{costTotal > 0 ? `NT$${costTotal.toLocaleString()}` : "—"}</td>
                     <td>{hasAbc ? <span className="tag tag-gold">有</span> : <span className="cell-muted">—</span>}</td>
                     <td className="cell-actions" onClick={e => e.stopPropagation()}>
                       <div className="flex gap-6">
@@ -2182,6 +2179,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
               <div className="info-kv mb-10">
                 {[
                   ["屬性", selected.attribute],
+                  ["性格", selected.personality],
                   ["痛點需求", selected.painPoint],
                   ["地區", selected.region],
                   ["休假", selected.vacation],
@@ -2408,7 +2406,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
           </div>
           <div className="form-row">
             <div className="form-group"><label className="label">屬性</label><input className="input" value={editData.attribute} onChange={e=>patchPartnerForm({ attribute: e.target.value })}/></div>
-            <div className="form-group"><label className="label">痛點需求</label><input className="input" value={editData.painPoint} onChange={e=>patchPartnerForm({ painPoint: e.target.value })}/></div>
+            <div className="form-group"><label className="label">性格</label><input className="input" value={editData.personality} onChange={e=>patchPartnerForm({ personality: e.target.value })}/></div>
           </div>
           <div className="form-row">
             <div className="form-group"><label className="label">地區</label><input className="input" value={editData.region} onChange={e=>patchPartnerForm({ region: e.target.value })}/></div>
@@ -2425,11 +2423,6 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             <div className="form-group"><label className="label">性別</label><input className="input" value={editData.gender} onChange={e=>patchPartnerForm({ gender: e.target.value })}/></div>
             <div className="form-group"><label className="label">關係</label><input className="input" value={editData.relation} onChange={e=>patchPartnerForm({ relation: e.target.value })}/></div>
           </div>
-          <div className="form-row">
-            <div className="form-group"><label className="label">年齡</label><input type="number" className="input" value={editData.age} onChange={e=>patchPartnerForm({ age: e.target.value })}/></div>
-            <div className="form-group"><label className="label">職業</label><input className="input" value={editData.occupation} onChange={e=>patchPartnerForm({ occupation: e.target.value })}/></div>
-          </div>
-          <div className="form-group"><label className="label">薪資</label><input type="text" className="input" value={editData.salary} onChange={e=>patchPartnerForm({ salary: e.target.value })} placeholder="例：NT$45,000、5萬/月、面議"/></div>
           <div className="form-group">
             <label className="label">談場（日期）</label>
             <textarea className="input" style={{minHeight:64}} value={editData.dateTalkVenue || ""} onChange={e=>patchPartnerForm({ dateTalkVenue: e.target.value })} placeholder={"每行一個，或逗號／頓號分隔\n例：2026-04-01、2026-04-15"}/>
