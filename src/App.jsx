@@ -1004,6 +1004,14 @@ const css = `
   .partner-table .cell-muted{color:var(--text3)}
   .partner-table .cell-cost{color:var(--red);font-family:'DM Mono',monospace;font-size:11px}
   .partner-table-empty{text-align:center;color:var(--text3);padding:40px 16px;font-size:13px}
+
+  /* ── Collapsible details & view toggle ── */
+  .details-toggle{display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:#fff;color:var(--text2);font-size:11px;cursor:pointer;font-family:'DM Mono',monospace}
+  .details-toggle:hover{border-color:var(--gold-border);color:var(--gold)}
+  .view-toggle{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .view-toggle button{border:none;background:#fff;padding:6px 14px;font-size:12px;cursor:pointer;color:var(--text2);font-family:'DM Mono',monospace}
+  .view-toggle button.active{background:var(--gold-light);color:var(--gold);font-weight:700}
+
   .avatar{width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,var(--gold-light),#fff);display:flex;align-items:center;justify-content:center;font-family:'Playfair Display',serif;font-size:17px;color:var(--gold);border:2px solid var(--gold-border);flex-shrink:0}
   .avatar-lg{width:62px;height:62px;font-size:23px}
   .role-badge{display:inline-block;padding:2px 7px;border-radius:5px;font-size:10px;font-family:'DM Mono',monospace;letter-spacing:.5px}
@@ -1305,7 +1313,7 @@ export default function App() {
           </nav>
         </header>
         <main className="main">
-          {tab==="dashboard" && <Dashboard partners={partners} interactions={interactions} setInteractions={i=>persist(KEYS.interactions,i,setInteractions)} todos={todos} goals={goals} setGoals={g=>persist(KEYS.goals,g,setGoals)} setTodos={t=>persist(KEYS.todos,t,setTodos)} manifest={manifest} setManifest={m=>persist(KEYS.manifest,m,setManifest)} incomes={incomes} persistIncomes={v=>persist(KEYS.incomes,v,setIncomes)} selfCosts={selfCosts} persistSelfCosts={v=>persist(KEYS.selfCosts,v,setSelfCosts)}/>}
+          {tab==="dashboard" && <Dashboard partners={partners} interactions={interactions} goals={goals} setGoals={g=>persist(KEYS.goals,g,setGoals)} manifest={manifest} setManifest={m=>persist(KEYS.manifest,m,setManifest)} incomes={incomes} persistIncomes={v=>persist(KEYS.incomes,v,setIncomes)} selfCosts={selfCosts} persistSelfCosts={v=>persist(KEYS.selfCosts,v,setSelfCosts)}/>}
           {tab==="partners"  && <Partners
             partners={partners}
             setPartners={p=>persist(KEYS.partners,p,setPartners)}
@@ -1324,7 +1332,7 @@ export default function App() {
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────
-function Dashboard({ partners, interactions, setInteractions, goals, setGoals, manifest, setManifest, incomes, persistIncomes, selfCosts, persistSelfCosts }) {
+function Dashboard({ partners, interactions, goals, setGoals, manifest, setManifest, incomes, persistIncomes, selfCosts, persistSelfCosts }) {
   const [editGoals, setEditGoals] = useState(false);
   const [editManifest, setEditManifest] = useState(false);
   const [gd, setGd] = useState(goals);
@@ -1336,6 +1344,9 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
   const [showCostForm, setShowCostForm] = useState(false);
   const [editingCostId, setEditingCostId] = useState("");
   const [costDraft, setCostDraft] = useState({ date: new Date().toISOString().slice(0,10), type: "買貨", amount: "", note: "" });
+  const [incomeDetailsOpen, setIncomeDetailsOpen] = useState(false);
+  const [costDetailsOpen, setCostDetailsOpen] = useState(false);
+  const [partnerCostDetailsOpen, setPartnerCostDetailsOpen] = useState(false);
 
   const saveIncomes = (next) => {
     persistIncomes(next);
@@ -1380,12 +1391,6 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
   const totalIncome = incomes.reduce((s,i)=>s+i.amount,0);
   const totalCost = selfCosts.reduce((s,c)=>s+(+c.amount||0),0);
   const pct = (v,m) => Math.min(100, Math.round((v/(m||1))*100));
-
-  // Pending items from time axis (interactions with status 待執行)
-  const pendingInteractions = interactions
-    .filter(i=>i.status==="待執行")
-    .sort((a,b)=>toMsDT(a.date,a.time) - toMsDT(b.date,b.time));
-  const toggleInteraction = (id) => setInteractions((prev) => prev.map(i=>i.id===id?{...i,status:"已完成"}:i));
 
   const openIncomeNew = () => {
     newIncomeTempId.current = "";
@@ -1520,7 +1525,12 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
               <button className="btn btn-ghost btn-sm" style={{flexShrink:0}} onClick={openIncomeNew}>＋</button>
             </div>
             {incomes.length===0&&<div style={{fontSize:11,color:"var(--text3)"}}>尚無收入紀錄</div>}
-            {[...incomes].sort((a,b)=>b.date.localeCompare(a.date)).map(i=>(
+            {incomes.length>0&&(
+              <button type="button" className="details-toggle" onClick={()=>setIncomeDetailsOpen(v=>!v)}>
+                {incomeDetailsOpen ? "▲ 收起明細" : `▼ 展開明細（${incomes.length} 筆）`}
+              </button>
+            )}
+            {incomeDetailsOpen && [...incomes].sort((a,b)=>b.date.localeCompare(a.date)).map(i=>(
               <div key={i.id} className="flex items-center justify-between" style={{padding:"5px 0",borderTop:"1px solid var(--gold-border)"}}>
                 <div><div className="text-sm">{i.note||"收入"}</div><div className="text-xs mono" style={{color:var_gold,opacity:.7}}>{i.date}</div></div>
                 <div className="flex items-center gap-8">
@@ -1539,25 +1549,28 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
               <button className="btn btn-ghost btn-sm" style={{padding:"2px 8px"}} onClick={openCostNew}>＋</button>
             </div>
             <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"var(--red)",marginBottom:10}}>NT${totalCost.toLocaleString()}</div>
-            {(() => {
-              if(allCosts.length===0) return <div style={{fontSize:11,color:"var(--text3)"}}>尚無支出紀錄</div>;
-              return allCosts.map(c=>(
-                <div key={c.id} className="flex justify-between items-center" style={{padding:"5px 0",borderTop:"1px solid #fecdd3"}}>
-                  <div className="flex items-center gap-5">
-                    <span style={{fontSize:9,padding:"1px 4px",borderRadius:3,border:`1px solid ${TYPE_COLOR[c.type]||"#ccc"}`,color:TYPE_COLOR[c.type]||"#888",fontFamily:"'DM Mono',monospace"}}>{c.type}</span>
-                    <div>
-                      <div style={{fontSize:11,color:"var(--text2)"}}>{c.note||"支出"}</div>
-                      <div style={{fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{c.date}</div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-8">
-                    <span className="mono" style={{fontSize:12,color:"var(--red)"}}>NT${c.amount.toLocaleString()}</span>
-                    <button style={{background:"none",border:"none",color:"var(--gold)",cursor:"pointer",fontSize:11}} onClick={()=>openCostEdit(c)}>✏</button>
-                    <button style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:11}} onClick={()=>deleteCost(c)}>✕</button>
+            {allCosts.length===0&&<div style={{fontSize:11,color:"var(--text3)"}}>尚無支出紀錄</div>}
+            {allCosts.length>0&&(
+              <button type="button" className="details-toggle" onClick={()=>setCostDetailsOpen(v=>!v)}>
+                {costDetailsOpen ? "▲ 收起明細" : `▼ 展開明細（${allCosts.length} 筆）`}
+              </button>
+            )}
+            {costDetailsOpen && allCosts.map(c=>(
+              <div key={c.id} className="flex justify-between items-center" style={{padding:"5px 0",borderTop:"1px solid #fecdd3"}}>
+                <div className="flex items-center gap-5">
+                  <span style={{fontSize:9,padding:"1px 4px",borderRadius:3,border:`1px solid ${TYPE_COLOR[c.type]||"#ccc"}`,color:TYPE_COLOR[c.type]||"#888",fontFamily:"'DM Mono',monospace"}}>{c.type}</span>
+                  <div>
+                    <div style={{fontSize:11,color:"var(--text2)"}}>{c.note||"支出"}</div>
+                    <div style={{fontSize:10,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{c.date}</div>
                   </div>
                 </div>
-              ));
-            })()}
+                <div className="flex items-center gap-8">
+                  <span className="mono" style={{fontSize:12,color:"var(--red)"}}>NT${c.amount.toLocaleString()}</span>
+                  <button style={{background:"none",border:"none",color:"var(--gold)",cursor:"pointer",fontSize:11}} onClick={()=>openCostEdit(c)}>✏</button>
+                  <button style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:11}} onClick={()=>deleteCost(c)}>✕</button>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -1600,42 +1613,18 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
         </div>
       </div>
 
-      {/* ⑤ 待執行清單（來自時間軸） */}
-      <div className="card">
-        <div className="flex justify-between items-center mb-12">
-          <div className="subheading" style={{margin:0}}>📋 待執行清單
-            <span style={{marginLeft:8,fontFamily:"'DM Mono',monospace",fontSize:10,color:"var(--text3)"}}>（來自時間軸）</span>
-          </div>
-          <span style={{fontSize:11,color:"var(--text3)",fontFamily:"'DM Mono',monospace"}}>{pendingInteractions.length} 項</span>
-        </div>
-        {pendingInteractions.length===0&&<div className="empty" style={{padding:"10px 0"}}>🎉 全部完成！</div>}
-        {pendingInteractions.map(item=>{
-          const p = partners.find(x=>x.id===item.partnerId);
-          return (
-            <div key={item.id} className="flex items-center gap-10" style={{padding:"8px 0",borderBottom:"1px solid var(--border)"}}>
-              <input
-                type="checkbox"
-                style={{accentColor:var_gold,cursor:"pointer",width:16,height:16,flexShrink:0}}
-                onChange={()=>toggleInteraction(item.id)}
-              />
-              <div style={{flex:1,minWidth:0}}>
-                <div className="text-sm" style={{fontWeight:500}}>{item.title}</div>
-                <div style={{display:"flex",gap:6,marginTop:2,flexWrap:"wrap"}}>
-                  <span className="text-xs mono text-muted">{item.date}</span>
-                  {p&&<span className="text-xs text-muted">· {p.name}</span>}
-                  <span className="tag" style={{padding:"0 5px",fontSize:10}}>{item.type}</span>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
       {/* ⑥ 各夥伴投入金費 */}
       <div className="card">
-        <div className="subheading mb-12">💸 各夥伴投入金費</div>
+        <div className="flex items-center justify-between mb-12">
+          <div className="subheading" style={{margin:0}}>💸 各夥伴投入金費</div>
+          {partners.filter(p=>(p.costs||[]).length>0).length>0&&(
+            <button type="button" className="details-toggle" onClick={()=>setPartnerCostDetailsOpen(v=>!v)}>
+              {partnerCostDetailsOpen ? "▲ 收起明細" : "▼ 展開明細"}
+            </button>
+          )}
+        </div>
         {partners.filter(p=>(p.costs||[]).length>0).length===0&&<div className="empty" style={{padding:"8px 0"}}>尚無成本紀錄</div>}
-        {partners.filter(p=>(p.costs||[]).length>0).map(p=>{
+        {partnerCostDetailsOpen && partners.filter(p=>(p.costs||[]).length>0).map(p=>{
           const total=(p.costs||[]).reduce((a,c)=>a+c.amount,0);
           return (
             <div key={p.id} className="mt-10">
@@ -2653,6 +2642,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
   const [partnerSearch, setPartnerSearch] = useState("");
   const [calMonth, setCalMonth] = useState(()=>{ const n=new Date(); return {y:n.getFullYear(),m:n.getMonth()}; });
   const [calDayListModal, setCalDayListModal] = useState(null); // { ymd, items }
+  const [timelineView, setTimelineView] = useState("calendar"); // calendar | list
 
   const sortByNearToday = (a, b) => {
     const todayMs = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00").getTime();
@@ -2756,9 +2746,11 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
     return i.type === filter;
   };
   const filteredItems = calendarItems.filter(matchesCalFilter);
-  /** 由上線會議拆出的子筆：下方「本月紀錄」不重複列出 */
+  /** 由上線會議拆出的子筆：列表檢視不重複列出 */
   const isDerivedMeetingPlanLine = (i) => i.fromMeetingId != null && String(i.fromMeetingId).trim() !== "";
   const timelineListItems = filteredItems.filter(i => !isDerivedMeetingPlanLine(i));
+  const monthPrefix = `${calMonth.y}-${String(calMonth.m+1).padStart(2,"0")}`;
+  const monthListRows = [...timelineListItems].filter(i => i.date.startsWith(monthPrefix)).sort(sortByNearToday);
 
   const TIMELINE_STAT_TYPES = ["上線會議", "實體暖身", "追蹤", "規劃", "談場", "團隊活動", "產品課程", "新人啟動"];
   const monthStatsPrefix = `${calMonth.y}-${String(calMonth.m + 1).padStart(2, "0")}`;
@@ -2960,7 +2952,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
         </div>
       </div>
 
-      {/* 月曆（唯一檢視）：分類篩選 + 格線 + 本月紀錄 */}
+      {/* 分類篩選 + 月曆／列表切換 */}
       <div>
           <div className="flex gap-8 mb-14" style={{flexWrap:"wrap"}}>
             {Object.keys(CAL_FILTER_SLUG).map((f) => (
@@ -2974,11 +2966,19 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
               </button>
             ))}
           </div>
-          <div className="flex items-center justify-between mb-12">
+          <div className="flex items-center justify-between mb-12" style={{gap:12,flexWrap:"wrap"}}>
             <button className="btn btn-ghost btn-sm" onClick={()=>setCalMonth(p=>{const d=new Date(p.y,p.m-1);return{y:d.getFullYear(),m:d.getMonth()};})}>‹ 上月</button>
-            <span style={{fontFamily:"'Playfair Display',serif",color:var_gold,fontSize:18}}>{calMonth.y} 年 {calMonth.m+1} 月</span>
+            <div className="flex items-center gap-12" style={{flexWrap:"wrap",justifyContent:"center"}}>
+              <span style={{fontFamily:"'Playfair Display',serif",color:var_gold,fontSize:18}}>{calMonth.y} 年 {calMonth.m+1} 月</span>
+              <div className="view-toggle">
+                <button type="button" className={timelineView==="calendar"?"active":""} onClick={()=>setTimelineView("calendar")}>月曆</button>
+                <button type="button" className={timelineView==="list"?"active":""} onClick={()=>setTimelineView("list")}>列表</button>
+              </div>
+            </div>
             <button className="btn btn-ghost btn-sm" onClick={()=>setCalMonth(p=>{const d=new Date(p.y,p.m+1);return{y:d.getFullYear(),m:d.getMonth()};})}>下月 ›</button>
           </div>
+          {timelineView === "calendar" ? (
+          <>
           {/* Day headers */}
           <div className="cal-grid" style={{marginBottom:3}}>
             {["日","一","二","三","四","五","六"].map(d=><div key={d} className="mono" style={{textAlign:"center",fontSize:10,color:"var(--text3)",padding:"3px 0"}}>{d}</div>)}
@@ -3052,32 +3052,30 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
               </div>
             </Modal>
           )}
-          {/* 本月紀錄：不列出上線會議拆出的子筆規劃，避免與主紀錄重複 */}
-          <div className="subheading">本月紀錄</div>
+          </>
+          ) : (
           <div className="card" style={{padding:0}}>
-            {(() => {
-              const monthPrefix = `${calMonth.y}-${String(calMonth.m+1).padStart(2,"0")}`;
-              const monthRows = [...timelineListItems].filter(i => i.date.startsWith(monthPrefix)).sort(sortByNearToday);
-              if (monthRows.length === 0) return <div className="empty">本月尚無紀錄</div>;
-              return monthRows.map(item=>{
-                const p=getP(item.partnerId);
-                return (
-                  <div key={item.id} className="timeline-item" onClick={()=>setSelected(item)}>
-                    <div className={`tl-dot type-${item.type}`}/>
-                    <div style={{flex:1}}>
-                      <div className="flex items-center gap-6" style={{flexWrap:"wrap"}}>
-                        <span style={{fontWeight:600,fontSize:13}}>{item.title}</span>
-                        {!item.isPartnerSchedule && <span className={`status-badge status-${item.status}`}>{item.status}</span>}
-                        <span className="tag">{item.type}</span>
-                      </div>
-                      <div className="text-xs mono text-muted mt-3">{item.date} {normalizeTime(item.time)}{p&&<span> · {p.name}</span>}</div>
+            {monthListRows.length === 0 ? (
+              <div className="empty">本月尚無紀錄</div>
+            ) : monthListRows.map(item=>{
+              const p=getP(item.partnerId);
+              return (
+                <div key={item.id} className="timeline-item" onClick={()=>setSelected(item)}>
+                  <div className={`tl-dot type-${item.type}`}/>
+                  <div style={{flex:1}}>
+                    <div className="flex items-center gap-6" style={{flexWrap:"wrap"}}>
+                      <span style={{fontWeight:600,fontSize:13}}>{item.title}</span>
+                      {!item.isPartnerSchedule && <span className={`status-badge status-${item.status}`}>{item.status}</span>}
+                      <span className="tag">{item.type}</span>
                     </div>
-                    {!item.isPartnerSchedule && <button className={`btn btn-sm ${item.status==="已完成"?"btn-gold":"btn-ghost"}`} style={{flexShrink:0,alignSelf:"flex-start"}} onClick={e=>{e.stopPropagation();toggle(item.id);}}>{item.status==="已完成"?"✓":"○"}</button>}
+                    <div className="text-xs mono text-muted mt-3">{item.date} {normalizeTime(item.time)}{p&&<span> · {p.name}</span>}</div>
                   </div>
-                );
-              });
-            })()}
+                  {!item.isPartnerSchedule && <button className={`btn btn-sm ${item.status==="已完成"?"btn-gold":"btn-ghost"}`} style={{flexShrink:0,alignSelf:"flex-start"}} onClick={e=>{e.stopPropagation();toggle(item.id);}}>{item.status==="已完成"?"✓":"○"}</button>}
+                </div>
+              );
+            })}
           </div>
+          )}
       </div>
 
       {/* Detail modal */}
