@@ -2113,6 +2113,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
             <thead>
               <tr>
                 <th>姓名</th>
+                <th>熟悉度</th>
                 <th>狀態</th>
                 <th>屬性</th>
                 <th>性格</th>
@@ -2136,6 +2137,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
                         <span style={{ fontWeight: 700 }}>{p.name || "—"}</span>
                       </div>
                     </td>
+                    <td className="cell-muted mono">{p.familiarity ? `${p.familiarity} 分` : "—"}</td>
                     <td>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                         {roleBadge(p.role)}
