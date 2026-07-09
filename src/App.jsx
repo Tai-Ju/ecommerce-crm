@@ -229,6 +229,64 @@ const scheduleFieldForType = (t) =>
   ({ 談場: "dateTalkVenue", 談場未到: "dateTalkVenueNoShow", 團隊活動: "dateTeamActivity", 實體暖身: "dateWarmupPhysical", 產品課程: "dateProductCourse" }[t] || "");
 
 /** 互動紀錄若為行程類型，將日期併入夥伴對應欄位（多日期） */
+function removeDateFromPartnerField(partnerId, type, date, setPartners) {
+  const field = scheduleFieldForType(type);
+  if (!field || !partnerId || !date) return;
+  setPartners((prev) =>
+    prev.map((p) => (p.id === partnerId ? { ...p, [field]: removeOneYmdFromField(p[field], date) } : p))
+  );
+}
+
+function makeScheduleInteraction(partnerId, type, date) {
+  return {
+    id: uid(),
+    date,
+    time: "00:00:00",
+    partnerId,
+    type,
+    title: type === "談場未到" ? "談場·未到" : type,
+    content: "",
+    status: "待執行",
+    tags: "",
+    partnerPlan: "",
+    actionItems: "",
+    quote: "",
+  };
+}
+
+/** 依夥伴日期欄位，同步時間軸互動（雙向同步：人脈 → 時間軸） */
+function reconcilePartnerScheduleInteractions(partner, setInteractions) {
+  if (!partner?.id) return;
+  const partnerId = partner.id;
+  setInteractions((prev) => {
+    let next = [...prev];
+    for (const type of SCHEDULE_TYPES) {
+      const field = scheduleFieldForType(type);
+      const dates = parseMultiYmdList(partner[field]);
+      const dateSet = new Set(dates);
+      next = next.filter((i) => {
+        if (i.partnerId !== partnerId || i.type !== type || !i.date) return true;
+        return dateSet.has(i.date);
+      });
+      for (const date of dates) {
+        if (!next.some((i) => i.partnerId === partnerId && i.type === type && i.date === date)) {
+          next.push(makeScheduleInteraction(partnerId, type, date));
+        }
+      }
+    }
+    return next;
+  });
+}
+
+function cleanupPartnerFieldBeforeInteractionSave(entry, prevInteractions, setPartners) {
+  if (!entry?.id) return;
+  const prev = prevInteractions.find((i) => i.id === entry.id);
+  if (!prev || !SCHEDULE_TYPES.includes(prev.type) || !prev.partnerId || !prev.date) return;
+  if (prev.type !== entry.type || prev.date !== entry.date || prev.partnerId !== entry.partnerId) {
+    removeDateFromPartnerField(prev.partnerId, prev.type, prev.date, setPartners);
+  }
+}
+
 function syncPartnerFieldFromInteraction(entry, setPartners) {
   const field = scheduleFieldForType(entry.type);
   if (!field || !entry.partnerId || !entry.date) return;
@@ -1313,7 +1371,7 @@ function Dashboard({ partners, interactions, setInteractions, goals, setGoals, m
     .filter(e => !interactionScheduleSet.has(`${e.partnerId}|${e.type}|${e.date}`));
   const mergedTimelineForStats = [...interactions, ...partnerScheduleEvents];
   const timelineCounts = {
-    talk: mergedTimelineForStats.filter(i => i.type === "談場" || i.type === "談場未到").length,
+    talk: mergedTimelineForStats.filter(i => i.type === "談場").length,
     warmupPhysical: mergedTimelineForStats.filter(i => i.type === "實體暖身").length,
     teamActivity: mergedTimelineForStats.filter(i => i.type === "團隊活動").length,
     meeting: mergedTimelineForStats.filter(i => i.type === "上線會議").length,
@@ -1836,6 +1894,10 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
         return p.map((x) => (x.id === entry.id ? { ...x, ...entry } : x));
       });
       setSelected((s) => (s && s.id === entry.id ? { ...s, ...entry } : s));
+      const scheduleFields = ["dateTalkVenue", "dateTalkVenueNoShow", "dateTeamActivity", "dateWarmupPhysical", "dateProductCourse"];
+      if (scheduleFields.some((f) => Object.prototype.hasOwnProperty.call(partial, f))) {
+        reconcilePartnerScheduleInteractions(entry, setInteractions);
+      }
       return merged;
     });
   };
@@ -1980,8 +2042,8 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
 
   const deleteInteraction = (id) => {
     if (!selected) return;
+    const target = interactions.find((i) => i.id === id);
     setInteractions((prev) => {
-      const target = prev.find((i) => i.id === id);
       let next = prev.filter((i) => i.id !== id);
       if (target?.type === "上線會議") {
         next = removeInteractionsSyncedFromMeeting(next, id);
@@ -1991,6 +2053,9 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
       }
       return next;
     });
+    if (target && SCHEDULE_TYPES.includes(target.type) && target.partnerId && target.date) {
+      removeDateFromPartnerField(target.partnerId, target.type, target.date, setPartners);
+    }
     setShowInteractionForm(false);
   };
 
@@ -2004,6 +2069,7 @@ function Partners({ partners, setPartners, interactions, setInteractions, rawSav
     (raw) => {
       if (!selected || !raw) return;
       if (!interactionDraftIsPersistable(raw, interactionsIxRef.current)) return;
+      cleanupPartnerFieldBeforeInteractionSave(raw, interactionsIxRef.current, setPartners);
       const tagsArr = normalizeTags(raw.tags);
       const entry = { ...raw, time: normalizeTime(raw.time), tags: tagsArr, partnerId: raw.type === "上線會議" ? "" : selected.id };
       if (entry.type === "上線會議") entry.actionItems = "";
@@ -2725,6 +2791,7 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
   const flushTimelineItemNow = useCallback((raw) => {
     if (!raw?.id) return;
     if (!interactionDraftIsPersistable(raw, interactionsTLRef.current)) return;
+    cleanupPartnerFieldBeforeInteractionSave(raw, interactionsTLRef.current, setPartners);
     const entry = {
       ...raw,
       time: normalizeTime(raw.time),
@@ -2766,8 +2833,8 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
     closeTimelineForm();
   };
   const del = (id) => {
+    const target = interactions.find((i) => i.id === id);
     setInteractions((prev) => {
-      const target = prev.find((i) => i.id === id);
       let next = prev.filter((i) => i.id !== id);
       if (target?.type === "上線會議") {
         next = removeInteractionsSyncedFromMeeting(next, id);
@@ -2776,6 +2843,9 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
       }
       return next;
     });
+    if (target && SCHEDULE_TYPES.includes(target.type) && target.partnerId && target.date) {
+      removeDateFromPartnerField(target.partnerId, target.type, target.date, setPartners);
+    }
     setSelected(null);
   };
   const toggle = (id) => setInteractions((prev) => prev.map(i=>i.id===id?{...i,status:i.status==="已完成"?"待執行":"已完成"}:i));
@@ -2796,8 +2866,8 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
     const orig = draft.originalYmd ?? draft.date;
     const newYmd = String(draft.date || "").trim();
     if (!isYmd(newYmd)) return;
-    setPartners((prev) =>
-      prev.map((p) => {
+    setPartners((prev) => {
+      const next = prev.map((p) => {
         if (p.id !== draft.partnerId) return p;
         const fromField = draft.fromField;
         const updated = { ...p };
@@ -2813,9 +2883,12 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
           updated[toField] = toList.join("、");
         }
         return updated;
-      })
-    );
-  }, [setPartners]);
+      });
+      const updated = next.find((p) => p.id === draft.partnerId);
+      if (updated) reconcilePartnerScheduleInteractions(updated, setInteractions);
+      return next;
+    });
+  }, [setPartners, setInteractions]);
 
   useEffect(() => {
     if (!scheduleDraft) return;
@@ -2841,7 +2914,9 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
       if (p.id !== scheduleDraft.partnerId) return p;
       return { ...p, [scheduleDraft.fromField]: removeOneYmdFromField(p[scheduleDraft.fromField], ymd) };
     });
+    const updated = next.find((p) => p.id === scheduleDraft.partnerId);
     setPartners(next);
+    if (updated) reconcilePartnerScheduleInteractions(updated, setInteractions);
     setScheduleDraft(null);
     setSelected(null);
   };
@@ -3040,7 +3115,9 @@ function Timeline({ interactions, setInteractions, partners, setPartners }) {
                 const next = partners.map(p =>
                   p.id === selected.partnerId ? { ...p, [field]: removeOneYmdFromField(p[field], ymd) } : p
                 );
+                const updated = next.find((p) => p.id === selected.partnerId);
                 setPartners(next);
+                if (updated) reconcilePartnerScheduleInteractions(updated, setInteractions);
                 setSelected(null);
               }}>清除此日期</button>
             </div>
